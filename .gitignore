@@ -29,3 +29,12 @@ desktop.ini
 
 # 废弃的旧版宣传图（已被 douyin/ 下的反转钩子版替代）
 douyin/旧版/
+
+# ---- 展示物料：只留源码，预览图/宣传图本地保留但不入库 ----
+douyin/
+preview-*.png
+word-*.png
+Niumer软件logo设计*.png
+make_douyin_hook.py
+make_logo.py
+make_previews.py
