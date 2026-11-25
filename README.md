@@ -1,4 +1,4 @@
-# 窝囊费 SalaryTray
+# Niumer
 
 Windows 任务栏上的一个小工具条，**固定 186 × 32**，贴在右下角不挡事。能干四件事：算你每秒赚多少钱、上班偷偷背单词、把小说塞进一行字里看、顺便提醒你喝水起身。
 
@@ -76,7 +76,7 @@ Windows 任务栏上的一个小工具条，**固定 186 × 32**，贴在右下�
 
 ### 直接用
 
-到 [Releases](https://github.com/zwz888mm/wonangfei/releases) 下载 `wonangfei.exe`，双击即可。单文件，24 MB，不用装 Python，也不用装任何运行库。
+到 [Releases](https://github.com/zwz888mm/wonangfei/releases) 下载 `Niumer.exe`，双击即可。单文件，约 25 MB，不用装 Python，也不用装任何运行库。
 
 > 首次运行 Windows SmartScreen 可能提示「已保护你的电脑」，点「更多信息」→「仍要运行」即可 —— 程序没做代码签名。
 
@@ -109,7 +109,7 @@ python main.py
 
 喝水 / 起身 / 看远处三类可以分开设间隔，**只在工作日和你设定的时段内提醒**，下班不打扰。走的是 Windows 系统通知中心，不弹自家大窗口挡屏幕。
 
-> 如果收不到通知，检查「专注助手 / 免打扰」有没有把窝囊费拦了。
+> 如果收不到通知，检查「专注助手 / 免打扰」有没有把 Niumer 拦了。
 
 ---
 
@@ -119,7 +119,7 @@ python main.py
 python build.py
 ```
 
-产物在 `dist/窝囊费.exe`，约 25 MB。`窝囊费-slim2.spec` 里剔掉了用不到的 Qt 组件（软件 OpenGL、翻译文件、多余图片插件），**但 ssl / libssl / libcrypto 必须留着** —— 取天气走 HTTPS，删了天气就废。
+产物在 `dist/Niumer.exe`，约 25 MB。`Niumer.spec` 里剔掉了用不到的 Qt 组件（软件 OpenGL、翻译文件、多余图片插件），**但 ssl / libssl / libcrypto 必须留着** —— 取天气走 HTTPS，删了天气就废。
 
 ---
 
@@ -152,7 +152,7 @@ python ui_selftest_negative.py
 
 ## 宣传图
 
-`douyin/` 下是 7 张 1080 × 1920 的竖屏图，全部由 `make_douyin_hook.py` 用**真实绘制代码现场渲染**出来的，不是截图。改了界面重跑一次整组同步更新。
+`make_douyin_hook.py` 会现场渲染 7 张 1080 × 1920 的竖屏图输出到 `douyin/`，用的是**真实绘制代码**，不是截图。改了界面重跑一次整组同步更新。
 
 ```bash
 python make_douyin_hook.py
@@ -163,17 +163,17 @@ python make_douyin_hook.py
 ## 目录
 
 ```
-main.py                  全部源码，约 3800 行，单文件
-build.py                 打包脚本
-窝囊费-slim2.spec        PyInstaller 配置（精简版）
+main.py                  全部源码，约 4300 行，单文件
+build.py                 打包脚本（走 Niumer.spec）
+build.bat                双击打包
+Niumer.spec              PyInstaller 配置
+logo.ico                 exe 图标
+Niumer-head.png          标题栏 / 帮助页用的头像
+make_logo.py             由设计原图生成 ico 与头像
 ui_selftest.py           界面自检，28 项
 ui_selftest_negative.py  自检的反向对照
 make_douyin_hook.py      生成抖音竖屏宣传图
 我的词库.txt             词库格式示例
-考研核心词.txt           考研词表（261 词）
-换机说明.txt             换电脑时怎么把环境弄起来
-douyin/                  宣传图成品
-preview-*.png            文档用截图
 ```
 
 ---

@@ -179,7 +179,8 @@ for key in ("salary", "words", "remind", "novel"):
     for _ in range(3):
         app.processEvents()
     panel = sc.panels[key]
-    area = sc.areas[key]
+    area = next(sc.stack.widget(i) for i in range(sc.stack.count())
+                if sc.stack.widget(i).widget() is panel)
     check(f"{key} 面板无横向溢出",
           panel.minimumSizeHint().width() <= area.viewport().width() + 2,
           f"需要 {panel.minimumSizeHint().width()} / 可用 {area.viewport().width()}")

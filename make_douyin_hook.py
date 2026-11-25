@@ -149,7 +149,7 @@ def toast_card(w=940):
     p.setPen(QColor("#1a1d22"))
     p.setFont(f(33, True))
     p.drawText(QRectF(134, 42, w - 200, 40),
-               Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "窝囊费")
+               Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Niumer")
     p.setPen(QColor("#8b929c"))
     p.setFont(f(22))
     p.drawText(QRectF(w - 140, 42, 96, 40),

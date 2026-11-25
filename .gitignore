@@ -9,10 +9,11 @@ __pycache__/
 # 打包出来的可执行文件走 GitHub Releases 分发，不进仓库
 *.exe
 
-# 历史残留的打包配置，只保留正在用的 窝囊费-slim2.spec
+# 旧版打包配置（已废弃）
 SalaryTray.spec
 窝囊费.spec
 窝囊费-slim.spec
+窝囊费-slim2.spec
 窝囊费_test.spec
 
 # 源码包 / 压缩包
@@ -25,3 +26,6 @@ SalaryTray.spec
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 废弃的旧版宣传图（已被 douyin/ 下的反转钩子版替代）
+douyin/旧版/

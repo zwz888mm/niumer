@@ -1,7 +1,7 @@
-"""窝囊费 —— 任务栏实时工资条 + 上班偷偷学单词 + 摸鱼看小说。
+﻿"""Niumer —— 牛马打工人的桌面助手条。
 
 窗口固定在任务栏右下角，尺寸恒定 186x32。左键按住水平拖动切换三页：
-  1) 工资条：实时累计窝囊费与每秒收入
+  1) 工资条：实时累计今日工钱与每秒收入
   2) 单词卡：显示单词；点一下窗口后按空格进入默写，逐字输入判定
   3) 小说页：正文直接在小条里滚动，鼠标停在条上才走，移开即停；
      鼠标一离开就换成当地天气（伪装），移回来立刻恢复小说
@@ -22,23 +22,22 @@ import winreg
 from ctypes import wintypes
 
 from PyQt6.QtCore import (
-    QAbstractNativeEventFilter, QEasingCurve, QElapsedTimer, QObject, QPoint, QPointF,
+    QAbstractNativeEventFilter, QEasingCurve, QElapsedTimer, QObject, QPointF,
     QRectF, QSettings, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QColor, QCursor, QFont, QFontMetricsF, QIcon, QImage, QKeyEvent,
+    QColor, QCursor, QFont, QFontMetricsF, QIcon, QImage,
     QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygonF,
     QTextBlockFormat, QTextCursor, QTextDocument,
 )
 from PyQt6.QtGui import QAbstractTextDocumentLayout
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSpinBox, QStackedWidget,
-    QScrollArea, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QSystemTrayIcon,
-    QTextBrowser,
-    QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+    QSystemTrayIcon, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 WORK_HOURS_PER_DAY = 8
@@ -47,7 +46,7 @@ SECONDS_PER_MONTH = WORK_DAYS_PER_MONTH * WORK_HOURS_PER_DAY * 60 * 60
 
 PAGE_SALARY, PAGE_WORD, PAGE_NOVEL = 0, 1, 2
 PAGE_COUNT = 3
-PAGE_NAMES = ("工资条", "单词卡 · 偷偷背", "小说 · 摸鱼读")
+PAGE_NAMES = ("工资条 · Niumer", "单词卡 · 偷偷背", "小说 · 摸鱼读")
 VK_SPACE = 0x20
 FEEDBACK_MS = 1400
 
@@ -79,7 +78,7 @@ SWP_NOMOVE = 0x0002
 SWP_NOACTIVATE = 0x0010
 
 ERROR_ALREADY_EXISTS = 183
-MUTEX_NAME = "Local\\ZhgongTools_SalaryBar_SingleInstance"
+MUTEX_NAME = "Local\\Niumer_SingleInstance"
 _single_instance_handle = None
 
 BUILTIN_WORDS = [
@@ -478,6 +477,17 @@ def window_under(hwnd):
 
 
 def is_light_theme():
+    """读主题：优先 QSettings 覆盖值（0=跟随系统 / 1=浅色 / 2=深色）。"""
+    try:
+        s = QSettings("Niumer", "Niumer")
+        override = int(s.value("theme_override", 0) or 0)
+        if override == 1:
+            return True
+        if override == 2:
+            return False
+    except Exception:
+        pass
+    # 跟随 Windows
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -533,32 +543,65 @@ def elide(font, text, width):
     return QFontMetricsF(font).elidedText(text, Qt.TextElideMode.ElideRight, max(8.0, width))
 
 
+def _resource_path(name: str) -> str:
+    """定位资源：优先 exe 所在目录 → PyInstaller _MEIPASS → __file__ 目录。"""
+    # 1) exe 所在目录（PyInstaller onefile 运行时目录）
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+        p = os.path.join(base, name)
+        if os.path.exists(p):
+            return p
+        # 2) PyInstaller _MEIPASS 解压临时目录
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            p = os.path.join(meipass, name)
+            if os.path.exists(p):
+                return p
+    # 3) 源码目录
+    base = os.path.dirname(os.path.abspath(__file__))
+    p = os.path.join(base, name)
+    return p
+
+
 def make_tray_icon() -> QIcon:
+    """优先从 exe 同目录或打包资源加载 Niumer-head.png，找不到回退到绘制奶牛头像。"""
+    icon_path = _resource_path("Niumer-head.png")
+    if os.path.exists(icon_path):
+        pixmap = QPixmap(icon_path)
+        if not pixmap.isNull():
+            # 原图是 1536x1536，补上各档尺寸，标题栏/任务栏才不会模糊
+            icon = QIcon()
+            for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+                icon.addPixmap(pixmap.scaled(
+                    size, size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+            return icon
+    # 回退：正方形翠绿底 + 白色牛头 + 橙色牛角（与外部 PNG 同风格）
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(43, 45, 66))
-    painter.drawRoundedRect(1, 1, 62, 62, 12, 12)
-    painter.setBrush(QColor(255, 209, 102))
-    painter.drawEllipse(QRectF(10, 10, 44, 44))
-    eye_pen = QPen(QColor(43, 45, 66))
-    eye_pen.setWidth(2)
-    eye_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(eye_pen)
-    painter.drawLine(QPointF(21, 26), QPointF(28, 28))
-    painter.drawLine(QPointF(36, 28), QPointF(43, 26))
-    painter.drawArc(QRectF(23, 27, 18, 16), 180 * 16, 180 * 16)
-    painter.setPen(Qt.PenStyle.NoPen)
+    # 翠绿圆角正方形底
     painter.setBrush(QColor(16, 185, 129))
-    painter.drawEllipse(QRectF(42, 42, 20, 20))
-    font = QFont("Microsoft YaHei")
-    font.setPixelSize(13)
-    font.setBold(True)
-    painter.setFont(font)
-    painter.setPen(QColor(255, 255, 255))
-    painter.drawText(QRectF(42, 42, 20, 20), Qt.AlignmentFlag.AlignCenter, "¥")
+    painter.drawRoundedRect(0, 0, 64, 64, 14, 14)
+    # 白色牛头（圆角矩形）
+    painter.setBrush(QColor(255, 255, 255))
+    painter.drawRoundedRect(16, 22, 32, 24, 8, 8)
+    # 橙色牛角
+    painter.setBrush(QColor(249, 115, 22))
+    painter.drawPie(11, 8, 14, 16, 200 * 16, 140 * 16)   # 左角
+    painter.drawPie(39, 8, 14, 16, 200 * 16, 140 * 16)   # 右角
+    # 黑色眼睛
+    painter.setBrush(QColor(22, 34, 29))
+    painter.drawEllipse(22, 29, 5, 5)
+    painter.drawEllipse(37, 29, 5, 5)
+    # 鼻孔
+    painter.setBrush(QColor(200, 100, 100))
+    painter.drawEllipse(28, 37, 3, 3)
+    painter.drawEllipse(33, 37, 3, 3)
     painter.end()
     return QIcon(pixmap)
 
@@ -704,10 +747,6 @@ class WordDeck:
         self.index = (self.index + step) % len(self.words)
         self.save()
 
-    def goto(self, index):
-        self.index = max(0, min(int(index), len(self.words) - 1))
-        self.save()
-
     def goto_unlearned(self):
         """跳到下一个未掌握的词；全掌握则回到开头。"""
         n = len(self.words)
@@ -752,17 +791,6 @@ class WordDeck:
         self.combo = 0
         self.save()
         return True
-
-    def restore_builtin(self):
-        self.settings.remove("deck_basic_index")
-        self.settings.remove("deck_basic_states")
-        self.settings.setValue("deck_id", "basic")
-        self.deck_id = "basic"
-        self.words = self._source_words()
-        self.index = 0
-        self.states = {}
-        self.combo = 0
-        self.save()
 
     def reset_progress(self):
         """仅清空当前词库的学习记录，保留词表。"""
@@ -1111,86 +1139,151 @@ REMINDER_DEFAULTS = (
 
 
 def ui_palette():
-    """设置中心 / 帮助 / 弹窗共用的一套中性色。
-
-    原则：底色和卡片只差一点点，靠一条细边框分层；全局只用一个强调色，
-    避免原来蓝紫渐变那种“到处都在发光”的观感。
-    """
+    """Windows 10 settings palette. Flat, low contrast, Windows blue accent #0078D4."""
     if is_light_theme():
         return dict(
-            bg="#f2f4f7", card="#ffffff", border="#e4e7ec", text="#1f2329",
-            sub="#667085", faint="#98a2b3", accent="#2b7fff",
-            accent_soft="#eaf1ff", accent_line="#cfe0ff", track="#e8ebf0",
+            bg="#F3F3F3", card="#FFFFFF", border="#E5E5E5",
+            text="#1F1F1F", sub="#5C5C5C", faint="#8A8A8A",
+            accent="#0078D4", accent_soft="#E1EFFD", accent_line="#0078D4",
+            track="#E5E5E5", hover="#E9E9E9",
         )
     return dict(
-        bg="#17191d", card="#202329", border="#2e3238", text="#e6e8ee",
-        sub="#98a2b3", faint="#6b7280", accent="#4c8dff",
-        accent_soft="#1b2740", accent_line="#2f4a75", track="#33383f",
+        bg="#202020", card="#2D2D2D", border="#404040",
+        text="#F5F5F5", sub="#B0B0B0", faint="#7A7A7A",
+        accent="#0A84FF", accent_soft="#1A3A5C", accent_line="#0A84FF",
+        track="#3A3A3A", hover="#353535",
     )
-
-
 def dialog_style():
-    """配置弹窗统一 stylesheet：中性底 + 细边框卡片，只有一个强调色。"""
+    """Dialog QSS - Windows 10 settings style. Flat, 4px radius, Segoe UI, Win10 blue accent.
+
+    这条 QSS 是整个设置中心体系的**唯一权威样式来源**。所有对话框/面板都调它，
+    绝对禁止在 toggle_theme 或其他地方对子控件逐个 setStyleSheet 覆盖 color/background，
+    否则浅色模式会残留深色样式（白底白字）。
+    """
     p = ui_palette()
-    return """
-        QDialog { background:%(bg)s; color:%(text)s;
-            font-family:'Microsoft YaHei'; font-size:12px; }
-        QWidget { color:%(text)s; }
-        QLabel { color:%(text)s; background:transparent; }
-        QLabel#Hint { color:%(sub)s; font-size:11px; }
-        QLabel#Title { font-size:15px; font-weight:bold; }
-        QLabel#CardTitle { font-size:12px; font-weight:bold; color:%(text)s; }
-        QLabel#Big { font-size:30px; font-weight:bold; font-family:'Consolas'; color:%(accent)s; }
-        QFrame#Card, QFrame#Hero { background:%(card)s; border:1px solid %(border)s;
-            border-radius:10px; }
-        QGroupBox { background:%(card)s; border:1px solid %(border)s; border-radius:10px;
-            margin-top:12px; padding:16px 12px 12px 12px; font-weight:bold; color:%(text)s; }
-        QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 4px; color:%(text)s; }
-        QDoubleSpinBox, QSpinBox, QLineEdit { background:%(card)s; border:1px solid %(border)s;
-            border-radius:8px; padding:5px 9px; color:%(text)s;
-            selection-background-color:%(accent)s; selection-color:#ffffff; }
-        QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus { border:1px solid %(accent)s; }
-        QSpinBox QLineEdit, QDoubleSpinBox QLineEdit { border:none; background:transparent;
-            padding:0px; }
-        QCheckBox { spacing:8px; color:%(text)s; background:transparent; }
-        QCheckBox::indicator { width:16px; height:16px; border-radius:4px;
-            border:1px solid #c9d0da; background:%(card)s; }
-        QCheckBox::indicator:checked { background:%(accent)s; border:1px solid %(accent)s; }
-        QPushButton { background:%(card)s; color:%(text)s; border:1px solid %(border)s;
-            border-radius:8px; padding:7px 14px; }
-        QPushButton:hover { background:%(accent_soft)s; border-color:%(accent_line)s; }
-        QPushButton:pressed { background:%(track)s; }
-        QPushButton:disabled { color:%(faint)s; background:%(track)s; }
-        QPushButton#Primary { background:%(accent)s; color:#ffffff;
-            border:1px solid %(accent)s; font-weight:bold; }
-        QPushButton#Primary:hover { background:%(accent)s; border-color:%(accent)s;
-            color:#ffffff; }
-        QPushButton#Primary:disabled { background:%(track)s; color:%(faint)s;
-            border-color:%(border)s; }
-        QPushButton#Ghost { background:transparent; border:1px solid transparent;
-            color:%(sub)s; }
-        QPushButton#Ghost:hover { background:%(accent_soft)s; color:%(accent)s; }
-        QPushButton#Test { background:transparent; color:%(accent)s;
-            border:1px solid %(accent_line)s; }
-        QPushButton#Test:hover { background:%(accent_soft)s; }
-        QListWidget { background:transparent; border:none; outline:none; }
-        QListWidget::item { padding:8px 10px; border-radius:7px; margin:1px 0; }
-        QListWidget::item:hover { background:%(accent_soft)s; }
-        QListWidget::item:selected { background:%(accent_soft)s; color:%(accent)s; }
-        QScrollBar:vertical { background:transparent; width:10px; margin:2px; }
-        QScrollBar::handle:vertical { background:%(track)s; border-radius:5px;
-            min-height:26px; }
-        QScrollBar::handle:vertical:hover { background:%(faint)s; }
-        QScrollBar::add-line, QScrollBar::sub-line { height:0px; width:0px; }
-        QScrollBar::add-page, QScrollBar::sub-page { background:transparent; }
-    """ % p
+    font = "'Segoe UI', 'Microsoft YaHei'"
+    return f"""
+        /* ===== 根层级：保证所有后代默认颜色正确 ===== */
+        QDialog {{ background:{p['bg']}; color:{p['text']};
+            font-family:{font}; font-size:13px; }}
+        QWidget {{ color:{p['text']}; }}
+
+        /* ===== 标签 ===== */
+        QLabel {{ color:{p['text']}; background:transparent; }}
+        QLabel#Hint {{ color:{p['sub']}; font-size:12px; }}
+        QLabel#Subtitle {{ color:{p['sub']}; font-size:12px; }}
+        QLabel#Title {{ font-size:22px; font-weight:600; color:{p['text']}; }}
+        QLabel#CardTitle {{ font-size:15px; font-weight:600; color:{p['text']}; }}
+        QLabel#Big {{ font-size:28px; font-weight:600; font-family:'Consolas'; color:{p['accent']}; }}
+
+        /* ===== 卡片 / 分组 ===== */
+        QFrame#Card {{ background:{p['card']}; border:1px solid {p['border']}; border-radius:4px; }}
+        QFrame#Hero {{ background:{p['card']}; border:1px solid {p['border']}; border-radius:4px; }}
+        QFrame#Nav {{ background:{p['card']}; border:1px solid {p['border']}; border-radius:12px; color:{p['text']}; }}
+        QGroupBox {{ background:{p['card']}; border:1px solid {p['border']}; border-radius:4px;
+            margin-top:14px; padding:16px 14px 14px 14px;
+            font-weight:600; color:{p['text']}; }}
+        QGroupBox::title {{ subcontrol-origin:margin; left:14px; padding:0 6px; color:{p['text']}; }}
+
+        /* ===== 输入框 ===== */
+        QDoubleSpinBox, QSpinBox, QLineEdit, QComboBox, QPlainTextEdit {{
+            background:{p['card']}; border:1px solid {p['border']}; border-radius:4px;
+            padding:5px 10px; color:{p['text']}; selection-background-color:{p['accent']};
+            selection-color:#ffffff; }}
+        QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{
+            border:2px solid {p['accent']}; padding:4px 9px; }}
+        QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{ border:none; background:transparent; padding:0; }}
+        QComboBox::drop-down {{ border:none; width:20px; }}
+
+        /* ===== 下拉弹框（这个极易漏！没覆盖的话深色主题下拉是白底黑字）===== */
+        QComboBox QAbstractItemView, QAbstractItemView {{
+            background:{p['card']}; color:{p['text']}; border:1px solid {p['border']};
+            selection-background-color:{p['accent_soft']}; selection-color:{p['accent']};
+            outline:none; }}
+
+        /* ===== 复选框 ===== */
+        QCheckBox {{ spacing:10px; color:{p['text']}; background:transparent; }}
+        QCheckBox::indicator {{ width:16px; height:16px; border-radius:2px;
+            border:1px solid {p['border']}; background:{p['card']}; }}
+        QCheckBox::indicator:hover {{ border-color:{p['accent']}; }}
+        QCheckBox::indicator:checked {{ background:{p['accent']}; border:1px solid {p['accent']}; }}
+
+        /* ===== 按钮 ===== */
+        QPushButton {{
+            background:{p['card']}; color:{p['text']}; border:1px solid {p['border']};
+            border-radius:4px; padding:6px 14px; font-weight:500; min-height:24px; }}
+        QPushButton:hover {{ background:{p['hover']}; border-color:{p['border']}; }}
+        QPushButton:pressed {{ background:{p['track']}; color:{p['text']}; }}
+        QPushButton:disabled {{ color:{p['faint']}; background:{p['track']}; }}
+        QPushButton#Primary {{ background:{p['accent']}; color:#ffffff;
+            border:1px solid {p['accent']}; border-radius:4px; font-weight:500; }}
+        QPushButton#Primary:hover {{ background:#106EBE; border:1px solid #106EBE; color:#ffffff; }}
+        QPushButton#Primary:pressed {{ background:#005A9E; color:#ffffff; }}
+        QPushButton#Ghost {{ background:transparent; border:1px solid transparent; color:{p['sub']}; }}
+        QPushButton#Ghost:hover {{ background:{p['hover']}; color:{p['text']}; border-radius:4px; }}
+        QPushButton#Nav {{ background:transparent; border:none; border-radius:4px;
+            padding:10px 14px; text-align:left; color:{p['text']}; }}
+        QPushButton#Nav:hover {{ background:{p['hover']}; color:{p['text']}; }}
+        QPushButton#Nav:checked {{ background:{p['accent_soft']}; color:{p['accent']}; }}
+        QPushButton#NavCard {{ background:transparent; border:none; border-radius:8px;
+            padding:8px 10px; text-align:left; color:{p['text']}; }}
+        QPushButton#NavCard:hover {{ background:{p['hover']}; color:{p['text']}; }}
+        QPushButton#NavCard:checked {{ background:{p['accent_soft']}; color:{p['accent']}; }}
+
+        /* ===== 列表 ===== */
+        QListWidget {{ background:transparent; border:none; outline:none; color:{p['text']}; }}
+        QListWidget::item {{ padding:8px 12px; border-radius:4px; margin:1px 0; color:{p['text']}; }}
+        QListWidget::item:hover {{ background:{p['hover']}; color:{p['text']}; }}
+        QListWidget::item:selected {{ background:{p['accent_soft']}; color:{p['accent']}; }}
+
+        /* ===== 滚动条 ===== */
+        QScrollBar:vertical {{ background:transparent; width:12px; margin:2px; }}
+        QScrollBar::handle:vertical {{ background:{p['track']}; border-radius:2px; min-height:30px; }}
+        QScrollBar::handle:vertical:hover {{ background:{p['sub']}; }}
+        QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
+        QScrollBar::add-page, QScrollBar::sub-page {{ background:transparent; }}
+
+        /* ===== 滚动区域（viewport 必设！否则深色主题下 viewport 是系统默认白底）===== */
+        QScrollArea {{ background:transparent; border:none; }}
+        QScrollArea > QWidget > QWidget {{ background:transparent; }}
+        QScrollArea > QWidget#qt_scrollarea_viewport {{ background:{p['bg']}; color:{p['text']}; }}
+
+        /* ===== 工具提示 / 文件对话框 / 消息框 ===== */
+        QToolTip {{ background:{p['card']}; color:{p['text']}; border:1px solid {p['border']};
+            padding:4px 6px; border-radius:3px; }}
+        QFileDialog {{ background:{p['bg']}; color:{p['text']}; }}
+        QMessageBox {{ background:{p['bg']}; color:{p['text']}; }}
+        QDialogButtonBox QPushButton {{ min-width:80px; }}
+    """
 
 
+def apply_dialog_theme(widget, extra_qss=""):
+    """统一应用对话框主题：palette + QSS 双保险。
+
+    QSS 一旦出现语法错误，Qt 会静默丢弃后续规则，导致"背景变深、文字还是黑的"。
+    这里同时写 palette，保证即使 QSS 局部失效，文字仍然可读。
+    """
+    p = ui_palette()
+    pal = widget.palette()
+    pal.setColor(QPalette.ColorRole.Window, QColor(p['bg']))
+    pal.setColor(QPalette.ColorRole.WindowText, QColor(p['text']))
+    pal.setColor(QPalette.ColorRole.Base, QColor(p['card']))
+    pal.setColor(QPalette.ColorRole.AlternateBase, QColor(p['bg']))
+    pal.setColor(QPalette.ColorRole.Text, QColor(p['text']))
+    pal.setColor(QPalette.ColorRole.Button, QColor(p['card']))
+    pal.setColor(QPalette.ColorRole.ButtonText, QColor(p['text']))
+    pal.setColor(QPalette.ColorRole.Highlight, QColor(p['accent']))
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+    pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(p['card']))
+    pal.setColor(QPalette.ColorRole.ToolTipText, QColor(p['text']))
+    pal.setColor(QPalette.ColorRole.PlaceholderText, QColor(p['faint']))
+    widget.setPalette(pal)
+    widget.setStyleSheet(dialog_style() + extra_qss)
 
 def styled_message(parent, title, text, icon=QMessageBox.Icon.Information):
     """统一样式的消息弹窗。"""
     box = QMessageBox(icon, title, text, parent=parent)
-    box.setStyleSheet(dialog_style())
+    apply_dialog_theme(box)
     ok = box.addButton(QMessageBox.StandardButton.Ok)
     ok.setText("知道了")
     ok.setObjectName("Primary")
@@ -1298,7 +1391,7 @@ class ReminderManager:
         item["last"] = time.time() - item["minutes"] * 60 + minutes * 60
 
     def test(self):
-        self.notify("窝囊费 · 通知测试", "这条就是 Windows 系统通知，到点会这样提醒你活动、喝水。")
+        self.notify("Niumer · 通知测试", "这条就是 Windows 系统通知，到点会这样提醒你活动、喝水。")
 
     def next_due(self):
         """返回 (剩余秒数, 提醒名)；无启用项返回 None。"""
@@ -1476,11 +1569,63 @@ class _BasePanel(QWidget):
     def __init__(self, bar):
         super().__init__()
         self.bar = bar
-        self.setStyleSheet(dialog_style())
+        apply_dialog_theme(self)
+
+
+class AppearancePanel(_BasePanel):
+    """Appearance panel - Win10 style."""
+
+    def __init__(self, bar):
+        super().__init__(bar)
+        s = bar.settings
+        current = int(s.value("theme_override", 0) or 0)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Title
+        title = QLabel("选择主题")
+        title.setObjectName("Title")
+        title.setContentsMargins(24, 20, 24, 12)
+        root.addWidget(title)
+
+        # Theme picker row (like Win10 settings)
+        row1 = QFrame()
+        row1.setObjectName("Card")
+        rl = QHBoxLayout(row1)
+        rl.setContentsMargins(24, 14, 24, 14)
+        rl.setSpacing(16)
+
+        left_col = QVBoxLayout()
+        left_col.setSpacing(2)
+        lbl = QLabel("主题模式")
+        lbl.setObjectName("CardTitle")
+        sub = QLabel("浅色、深色，或跟随系统")
+        sub.setObjectName("Hint")
+        left_col.addWidget(lbl)
+        left_col.addWidget(sub)
+        rl.addLayout(left_col, 1)
+
+        self.combo = QComboBox()
+        self.combo.addItem("跟随系统", 0)
+        self.combo.addItem("浅色", 1)
+        self.combo.addItem("深色", 2)
+        self.combo.setCurrentIndex(current)
+        self.combo.setFixedWidth(180)
+        rl.addWidget(self.combo, 0, Qt.AlignmentFlag.AlignRight)
+        root.addWidget(row1)
+
+        root.addStretch(1)
+
+    def apply(self):
+        self.bar.settings.setValue("theme_override", self.combo.currentData())
+        self.bar.settings.sync()
+        self.bar.update_tip()
 
 
 class SalaryPanel(_BasePanel):
-    """窝囊费面板：月薪、快捷预设、计时操作。"""
+    """工资面板：月薪、快捷预设、计时操作。"""
 
     def __init__(self, bar):
         super().__init__(bar)
@@ -1518,7 +1663,7 @@ class SalaryPanel(_BasePanel):
         # 数字框不需要占满整行，铺到 490px 宽看着空
         self.spin.setMaximumWidth(190)
         self.spin.valueChanged.connect(self.update_preview)
-        cl.addRow("月薪（窝囊费）：", self.spin)
+        cl.addRow("月薪：", self.spin)
         presets = QFrame()
         pl = QHBoxLayout(presets)
         pl.setContentsMargins(0, 0, 0, 0)
@@ -1711,7 +1856,7 @@ class WordsPanel(_BasePanel):
 
     def on_deck(self, deck_id):
         if deck_id == "custom" and not self.bar.deck.custom_words:
-            styled_message(self, "窝囊费", "还没有自定义词库，请先从文件或粘贴导入。")
+            styled_message(self, "Niumer", "还没有自定义词库，请先从文件或粘贴导入。")
             self.refresh()
             return
         self.bar.deck.select_deck(deck_id)
@@ -1723,7 +1868,7 @@ class WordsPanel(_BasePanel):
     def on_continue(self):
         self.bar.goto_page(PAGE_WORD)
         self.bar.update_tip()
-        styled_message(self, "窝囊费", f"已定位到第 {self.bar.deck.index + 1} 词，接着背。")
+        styled_message(self, "Niumer", f"已定位到第 {self.bar.deck.index + 1} 词，接着背。")
 
     def on_next_unmastered(self):
         found = self.bar.deck.goto_unlearned()
@@ -1733,7 +1878,7 @@ class WordsPanel(_BasePanel):
         self.bar.update()
         self.refresh()
         msg = f"跳到第 {self.bar.deck.index + 1} 词（未掌握）。" if found else "全部已掌握，已回到开头。"
-        styled_message(self, "窝囊费", msg)
+        styled_message(self, "Niumer", msg)
 
     def on_reset_progress(self):
         self.bar.deck.reset_progress()
@@ -1741,7 +1886,7 @@ class WordsPanel(_BasePanel):
         self.bar.update_tip()
         self.bar.update()
         self.refresh()
-        styled_message(self, "窝囊费", "当前词库学习进度已清空。")
+        styled_message(self, "Niumer", "当前词库学习进度已清空。")
 
     def on_import(self):
         self.bar.import_words()
@@ -1769,7 +1914,7 @@ class ReminderPanel(_BasePanel):
         self.manager = bar.reminders
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         head = QLabel("定时提醒你活动、喝水，别一直坐着")
         head.setObjectName("Title")
@@ -1785,8 +1930,8 @@ class ReminderPanel(_BasePanel):
             card = QFrame()
             card.setObjectName("Card")
             outer = QVBoxLayout(card)
-            outer.setContentsMargins(14, 10, 14, 12)
-            outer.setSpacing(8)
+            outer.setContentsMargins(14, 8, 14, 10)
+            outer.setSpacing(6)
 
             top = QHBoxLayout()
             top.setSpacing(9)
@@ -1810,7 +1955,7 @@ class ReminderPanel(_BasePanel):
             outer.addLayout(top)
 
             form = QFormLayout()
-            form.setSpacing(7)
+            form.setSpacing(5)
             form.setLabelAlignment(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             )
@@ -2281,12 +2426,12 @@ class NovelPanel(_BasePanel):
             msg = "没有可导入的文件。"
         if skipped:
             msg += "\n\n跳过：\n" + "\n".join(skipped)
-        styled_message(self, "窝囊费 · 摸鱼阅读", msg)
+        styled_message(self, "Niumer · 摸鱼阅读", msg)
 
     def read_selected(self):
         path = self.selected_path() or self.shelf.current
         if not path:
-            styled_message(self, "窝囊费 · 摸鱼阅读", "书架还是空的，先导入一本 txt。")
+            styled_message(self, "Niumer · 摸鱼阅读", "书架还是空的，先导入一本 txt。")
             return
         self.shelf.set_current(path)
         self.refresh_list()
@@ -2471,7 +2616,7 @@ def help_pages():
     """使用说明：每节都写清楚“这是什么 / 怎么用 / 注意什么”，能配图就配图。"""
     pal = ui_palette()
     text, sub, accent = pal["text"], pal["sub"], pal["accent"]
-    soft, line, card = pal["accent_soft"], pal["accent_line"], pal["border"]
+    soft, line = pal["accent_soft"], pal["accent_line"]
 
     def h(t):
         return (
@@ -2529,10 +2674,10 @@ def help_pages():
             "右键小条 —— 菜单：切页、设置中心、使用帮助、隐藏窗口、退出",
             f"隐藏之后按 {k('Ctrl+Q')}，或点托盘图标，就能叫回来",
         ])
-        + note("第一次用，先右键 → 设置中心 → 窝囊费，把月薪填上；其余默认设置就能跑起来。")
+        + note("第一次用，先右键 → 设置中心 → 工资条，把月薪填上；其余默认设置就能跑起来。")
         + h("三页分别是什么")
         + table([
-            ("第一页", "工资条：每秒都在涨的“窝囊费”，一眼看到今天赚了多少"),
+            ("第一页", "工资条：每秒都在涨的“工钱”，一眼看到今天赚了多少"),
             ("第二页", "单词卡：一个单词 + 音标释义，轻点后按空格可以默写"),
             ("第三页", "摸鱼阅读：小说正文在条里慢慢滚，鼠标移开自动变天气"),
         ])
@@ -2545,7 +2690,7 @@ def help_pages():
         + img("salary", "第一页：左边绿点表示正在计时，右边是每秒进账速率。")
         + h("怎么设置")
         + ol([
-            "右键 → 设置中心 → 窝囊费",
+            "右键 → 设置中心 → 工资条",
             "填月薪（也可以直接点 ¥5000 这类预设按钮），点「保存并关闭」",
             "参数一改，累计金额自动接着算，不会清零",
         ])
@@ -2631,7 +2776,7 @@ def help_pages():
             "点「发送测试通知」可以立刻验一次通不通",
         ])
         + note("通知走 Windows 系统通知中心。点一下通知会把这条延后 10 分钟。"
-               "收不到就去 系统设置 → 系统 → 通知 里确认「窝囊费」没被拦，也没开专注助手。")
+               "收不到就去 系统设置 → 系统 → 通知 里确认「Niumer」没被拦，也没开专注助手。")
     )
 
     settings = (
@@ -2639,7 +2784,7 @@ def help_pages():
         + p("右键小条 → 设置中心。左边四张卡选功能，右边改参数，底部两个按钮。")
         + img("settings", "设置中心：左侧选功能，右侧改参数，右下角「保存并关闭」。", 700)
         + table([
-            ("窝囊费", "月薪、暂停/继续、显示累计或每秒、重置累计"),
+            ("工资条", "月薪、暂停/继续、显示累计或每秒、重置累计"),
             ("单词卡", "换词库、看学习进度、续背/跳到未掌握/重置、导入自定义词库"),
             ("健康提醒", "三类提醒的开关、间隔、文案，以及提醒时段"),
             ("摸鱼阅读", "书架、导入 txt、正文字号、滚动速度、天气伪装"),
@@ -2673,7 +2818,7 @@ def help_pages():
     data = (
         h("配置存在哪")
         + p("全部配置都在注册表里：")
-        + p(k("HKEY_CURRENT_USER\\Software\\ZhgongTools\\SalaryTray"))
+        + p(k("HKEY_CURRENT_USER\\Software\\Niumer\\Niumer"))
         + p("月薪、词库进度、书架与阅读位置、提醒设置、天气城市，都存在这一个键下面。")
         + h("备份与换电脑")
         + ol([
@@ -2684,7 +2829,7 @@ def help_pages():
         + note("想恢复出厂：退出程序后删掉这个键，下次启动就是全新状态（词库进度、书架都会清空）。")
         + h("程序文件")
         + table([
-            ("窝囊费.exe", "单文件，双击即用，不需要装 Python 或 Qt"),
+            ("Niumer.exe", "单文件，双击即用，不需要装 Python 或 Qt"),
             ("main.py", "全部源码，改完用 build.bat 重新打包"),
             ("换机说明.txt", "换电脑、重新打包的步骤"),
         ])
@@ -2692,7 +2837,7 @@ def help_pages():
 
     faq = (
         h("小条突然不见了？")
-        + p("先按 Ctrl+Q 试试。还不行就看任务管理器里有没有「窝囊费」进程 —— "
+        + p("先按 Ctrl+Q 试试。还不行就看任务管理器里有没有「Niumer」进程 —— "
             "没有就是退出了，重新双击 exe。")
         + h("点一下任务栏，小条就没影了？")
         + p("小条贴在任务栏上，而任务栏被点击时会把自己顶到最前面，把小条整块盖住，看起来就像消失了。"
@@ -2704,7 +2849,7 @@ def help_pages():
         + h("Ctrl+Q 按了没反应？")
         + p("可能被别的软件占了同一个热键，或者程序没在跑。用右键菜单里的「隐藏窗口 / 显示窗口」一样管用。")
         + h("到点了不弹通知？")
-        + p("Windows 设置 → 系统 → 通知，确认「窝囊费」是开着的，并且没开专注助手 / 免打扰。"
+        + p("Windows 设置 → 系统 → 通知，确认「Niumer」是开着的，并且没开专注助手 / 免打扰。"
             "设置里点「发送测试通知」能快速验证。")
         + h("小说不滚？")
         + p("按顺序查三件事：鼠标是不是停在条上（移开就停是故意的）、是不是轻点过暂停、"
@@ -2762,62 +2907,89 @@ class _HelpBrowser(QTextBrowser):
 
 
 class HelpDialog(QDialog):
-    """使用帮助：左侧目录，右侧图文说明（图是界面的真实渲染）。"""
+    """使用帮助：左侧目录导航 + 右侧文档浏览器风格正文。"""
 
     def __init__(self, bar=None, parent=None):
         super().__init__(parent)
         p = ui_palette()
-        self.setWindowTitle("窝囊费 · 使用帮助")
-        self.setMinimumSize(820, 600)
+        self.setWindowTitle("Niumer · 使用帮助")
+        self.setMinimumSize(860, 620)
         avail = QApplication.primaryScreen().availableGeometry()
-        self.resize(min(940, avail.width() - 80), min(820, avail.height() - 60))
-        self.setStyleSheet(
-            dialog_style()
-            + "QListWidget { background:transparent; border:none; outline:none;"
-            " font-size:13px; }"
-            "QListWidget::item { padding:10px 12px; border-radius:8px; margin:2px 0; }"
-            "QListWidget::item:selected { background:%(accent_soft)s; color:%(accent)s; }"
-            "QTextBrowser { background:%(card)s; border:1px solid %(border)s;"
-            " border-radius:10px; color:%(text)s; }" % p
-        )
+        self.resize(min(960, avail.width() - 80), min(860, avail.height() - 60))
+
+        browser_css = f"""
+            QTextBrowser {{
+                background:{p['card']}; border:1px solid {p['border']};
+                border-radius:12px; color:{p['text']}; padding:20px 24px;
+            }}
+            QTextBrowser h1 {{ font-size:20px; font-weight:700; color:{p['text']}; margin:0 0 12px 0; }}
+            QTextBrowser h2 {{ font-size:15px; font-weight:600; color:{p['text']}; margin:20px 0 8px 0; }}
+            QTextBrowser h3 {{ font-size:13px; font-weight:600; color:{p['sub']}; margin:16px 0 6px 0; }}
+            QTextBrowser p {{ margin:4px 0; line-height:1.7; color:{p['text']}; font-size:13px; }}
+            QTextBrowser ul {{ margin:6px 0; padding-left:20px; }}
+            QTextBrowser li {{ margin:3px 0; font-size:13px; color:{p['text']}; }}
+            QTextBrowser code {{ background:{p['accent_soft']}; color:{p['accent']};
+                padding:1px 6px; border-radius:4px; font-family:'Consolas'; font-size:12px; }}
+            QTextBrowser img {{ max-width:100%; border-radius:8px; margin:8px 0; }}
+            QTextBrowser strong {{ color:{p['text']}; font-weight:600; }}
+        """
+        nav_css = f"""
+            QListWidget {{ background:{p['card']}; border:1px solid {p['border']};
+                border-radius:12px; outline:none; padding:6px; font-size:13px; }}
+            QListWidget::item {{ padding:10px 14px; border-radius:8px; margin:2px 0; color:{p['text']}; }}
+            QListWidget::item:hover {{ background:{p['hover']}; }}
+            QListWidget::item:selected {{ background:{p['accent_soft']}; color:{p['accent']}; font-weight:600; }}
+        """
+        apply_dialog_theme(self, nav_css + browser_css)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 14)
-        outer.setSpacing(10)
+        outer.setContentsMargins(20, 18, 20, 18)
+        outer.setSpacing(14)
 
-        head = QLabel("使用说明")
-        head.setStyleSheet("font-size:18px; font-weight:bold;")
-        outer.addWidget(head)
-        sub = QLabel("左边按功能翻。文中配图是界面的真实渲染，配色跟随系统深浅色。")
-        sub.setObjectName("Hint")
-        sub.setWordWrap(True)
-        outer.addWidget(sub)
+        # 顶部标题
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        head_title = QLabel("使用帮助")
+        head_title.setStyleSheet("font-size:18px; font-weight:700;")
+        head_sub = QLabel("左侧选章节 · 右侧看图文说明")
+        head_sub.setObjectName("Subtitle")
+        head.addWidget(head_title)
+        head.addWidget(head_sub)
+        head.addStretch(1)
+        outer.addLayout(head)
 
         body = QHBoxLayout()
-        body.setSpacing(12)
+        body.setSpacing(16)
+
+        # 左侧目录
         self.nav = QListWidget()
-        self.nav.setFixedWidth(140)
+        self.nav.setFixedWidth(156)
         self.nav.setCursor(Qt.CursorShape.PointingHandCursor)
         self.images = self.build_images(bar)
+
+        # 右侧正文
         self.browser = _HelpBrowser(self.images)
         self.browser.setOpenExternalLinks(False)
-        self.browser.document().setDocumentMargin(16)
+        self.browser.document().setDocumentMargin(0)
         font = QFont("Microsoft YaHei")
         font.setPixelSize(13)
         self.browser.setFont(font)
+
         body.addWidget(self.nav, 0)
         body.addWidget(self.browser, 1)
         outer.addLayout(body, 1)
 
+        # 底部
         footer = QHBoxLayout()
-        tip = QLabel("右键小条 → 设置中心，改参数都在那里。")
+        footer.setContentsMargins(0, 6, 0, 0)
+        tip = QLabel("想改参数 → 右键小条 → 「设置中心」")
         tip.setObjectName("Hint")
         footer.addWidget(tip)
         footer.addStretch(1)
         ok = QPushButton("知道了")
         ok.setObjectName("Primary")
-        ok.setMinimumHeight(36)
-        ok.setMinimumWidth(108)
+        ok.setMinimumHeight(38)
+        ok.setMinimumWidth(112)
         ok.setCursor(Qt.CursorShape.PointingHandCursor)
         ok.clicked.connect(self.accept)
         footer.addWidget(ok)
@@ -2874,71 +3046,78 @@ class HelpDialog(QDialog):
 
 
 class SettingsCenter(QDialog):
-    """统一设置中心：左侧功能卡导航，右侧配置面板。"""
+    """统一设置中心：左侧图标导航，右侧配置面板。
+
+    风格参考 Linear / Raycast：左侧导航紧凑、选中态用浅底+细竖线指示；
+    右侧面板是一个大卡片，里面分组。
+    """
 
     CARDS = (
-        ("salary", "¥", "窝囊费", "月薪与计时"),
-        ("words", "A", "单词卡", "词库管理"),
-        ("remind", "!", "健康提醒", "定时提醒"),
-        ("novel", "书", "摸鱼阅读", "txt 自动滚"),
+        ("salary", "¥", "工资条", "月薪与每秒进账"),
+        ("words", "A", "单词卡", "词库与默写"),
+        ("remind", "!", "健康提醒", "喝水 · 活动 · 护眼"),
+        ("novel", "书", "摸鱼阅读", "TXT 自动滚"),
+        ("appearance", "◐", "外观", "主题 · 深浅色"),
     )
 
     def __init__(self, bar, parent=None):
         super().__init__(parent)
         p = ui_palette()
-        self.setWindowTitle("窝囊费 · 设置中心")
-        self.setMinimumSize(820, 620)
+        self.setWindowTitle("Niumer · 设置中心")
+        self.setMinimumSize(860, 640)
         avail = QApplication.primaryScreen().availableGeometry()
-        self.resize(min(900, avail.width() - 80), min(900, avail.height() - 60))
-        self.setStyleSheet(dialog_style() + """
-            QFrame#Nav { background:%(card)s; border:1px solid %(border)s;
-                border-radius:10px; }
-            QPushButton#NavCard { background:transparent; border:1px solid transparent;
-                border-radius:9px; padding:7px 8px; text-align:left; }
-            QPushButton#NavCard:hover { background:%(accent_soft)s; }
-            QPushButton#NavCard:checked { background:%(accent_soft)s;
-                border:1px solid %(accent_line)s; }
-            QLabel#NavTitle { font-size:13px; font-weight:bold; color:%(text)s; }
-            QLabel#NavSub { font-size:11px; color:%(sub)s; }
-            QLabel#NavBadge { font-size:13px; font-weight:bold; color:%(accent)s;
-                background:%(accent_soft)s; border-radius:8px; }
-        """ % p)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 14)
-        outer.setSpacing(12)
+        self.resize(min(960, avail.width() - 80), min(880, avail.height() - 60))
+        apply_dialog_theme(self, f"""
+            /* dialog_style() 已覆盖 QFrame#Nav / QPushButton#NavCard 的 color/background/border，
+               这里只设 Nav 专用的尺寸/圆角和 NavTitle/NavSub/NavBadge 这些独有的 objectName */
+            QFrame#Nav {{ border-radius:12px; }}
+            QPushButton#NavCard {{ border-radius:8px; padding:8px 10px; }}
+            QLabel#NavTitle {{ font-size:13px; font-weight:600; color:{p['text']}; background:transparent; }}
+            QLabel#NavSub {{ font-size:11px; color:{p['sub']}; background:transparent; }}
+            QLabel#NavBadge {{ font-size:13px; font-weight:700; color:{p['accent']};
+                background:{p['accent_soft']}; border-radius:8px; }}
+            QLabel#NavBadgeChecked {{ background:{p['accent']}; color:#ffffff; border-radius:8px; font-weight:700; font-size:13px; }}
+        """)
 
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 18)
+        outer.setSpacing(14)
+
+        # 顶部
         head = QHBoxLayout()
-        head.setSpacing(10)
-        title = QLabel("设置中心")
-        title.setStyleSheet("font-size:17px; font-weight:bold;")
-        head.addWidget(title)
+        head.setSpacing(12)
+        head_title = QLabel("设置中心")
+        head_title.setStyleSheet("font-size:18px; font-weight:700;")
+        head_sub = QLabel("改完点右下角保存立即生效")
+        head_sub.setObjectName("Subtitle")
+        head.addWidget(head_title)
+        head.addWidget(head_sub)
         head.addStretch(1)
-        tip = QLabel("改完点右下角「保存并关闭」生效")
-        tip.setObjectName("Hint")
-        head.addWidget(tip)
         outer.addLayout(head)
 
+        # 主体：左导航 + 右面板
         main = QHBoxLayout()
-        main.setSpacing(14)
+        main.setSpacing(16)
 
         nav = QFrame()
         nav.setObjectName("Nav")
-        nav.setFixedWidth(176)
+        nav.setFixedWidth(192)
         nl = QVBoxLayout(nav)
-        nl.setContentsMargins(8, 8, 8, 8)
-        nl.setSpacing(6)
+        nl.setContentsMargins(8, 10, 8, 10)
+        nl.setSpacing(4)
         self.nav_group = []
+        self.nav_badges = {}
         for key, icon, title_text, sub in self.CARDS:
             btn = QPushButton()
             btn.setObjectName("NavCard")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             bl = QHBoxLayout(btn)
-            bl.setContentsMargins(6, 2, 6, 2)
+            bl.setContentsMargins(8, 4, 8, 4)
             bl.setSpacing(10)
             badge = QLabel(icon)
             badge.setObjectName("NavBadge")
-            badge.setFixedSize(26, 26)
+            badge.setFixedSize(28, 28)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             texts = QVBoxLayout()
             texts.setSpacing(1)
@@ -2949,10 +3128,11 @@ class SettingsCenter(QDialog):
             texts.addWidget(t)
             texts.addWidget(s)
             bl.addWidget(badge)
-            bl.addLayout(texts)
+            bl.addLayout(texts, 1)
             btn.clicked.connect(lambda _, k=key: self.show_panel(k))
             nl.addWidget(btn)
             self.nav_group.append((key, btn))
+            self.nav_badges[key] = badge
         nl.addStretch(1)
         main.addWidget(nav, 0)
 
@@ -2962,40 +3142,35 @@ class SettingsCenter(QDialog):
             "words": WordsPanel(bar),
             "remind": ReminderPanel(bar),
             "novel": NovelPanel(bar),
+            "appearance": AppearancePanel(bar),
         }
-        self.areas = {}
         for key, panel in self.panels.items():
             area = QScrollArea()
             area.setWidgetResizable(True)
             area.setFrameShape(QFrame.Shape.NoFrame)
             area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            area.setStyleSheet(
-                "QScrollArea { background:transparent; border:none; }"
-                "QScrollArea > QWidget > QWidget { background:transparent; }"
-            )
             area.setWidget(panel)
-            self.areas[key] = area
             self.stack.addWidget(area)
         main.addWidget(self.stack, 1)
 
+        # 底部按钮
         footer = QHBoxLayout()
-        footer.setContentsMargins(0, 2, 0, 0)
+        footer.setContentsMargins(0, 6, 0, 0)
         help_btn = QPushButton("使用帮助")
         help_btn.setObjectName("Ghost")
-        help_btn.setMinimumHeight(36)
-        help_btn.setMinimumWidth(96)
+        help_btn.setMinimumHeight(38)
         help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         help_btn.clicked.connect(lambda: HelpDialog(bar, self).exec())
         done = QPushButton("保存并关闭")
         done.setObjectName("Primary")
-        done.setMinimumHeight(36)
-        done.setMinimumWidth(118)
+        done.setMinimumHeight(38)
+        done.setMinimumWidth(128)
         done.setCursor(Qt.CursorShape.PointingHandCursor)
         done.clicked.connect(self.accept)
         footer.addWidget(help_btn)
         footer.addStretch(1)
         footer.addWidget(done)
-        outer.addLayout(main)
+        outer.addLayout(main, 1)
         outer.addLayout(footer)
 
         self.show_panel("salary")
@@ -3003,7 +3178,17 @@ class SettingsCenter(QDialog):
     def show_panel(self, key):
         for k, btn in self.nav_group:
             btn.setChecked(k == key)
-        self.stack.setCurrentWidget(self.areas[key])
+        # 选中态：badge 实底
+        for k, badge in self.nav_badges.items():
+            if k == key:
+                badge.setObjectName("NavBadgeChecked")
+            else:
+                badge.setObjectName("NavBadge")
+            # 触发样式刷新
+            badge.style().unpolish(badge)
+            badge.style().polish(badge)
+        idx = list(self.panels.keys()).index(key)
+        self.stack.setCurrentIndex(idx)
 
     def accept(self):
         for panel in self.panels.values():
@@ -3015,7 +3200,7 @@ class SalaryBar(QWidget):
     def __init__(self, app: QApplication):
         super().__init__()
         self.app = app
-        self.settings = QSettings("ZhgongTools", "SalaryTray")
+        self.settings = QSettings("Niumer", "Niumer")
         self.monthly = float(self.settings.value("monthly_salary", 3000.0))
         self.show_total = True
         self.paused = False
@@ -3137,7 +3322,7 @@ class SalaryBar(QWidget):
     def build_menu(self):
         """精简菜单：只留页面切换、设置中心、隐藏、退出。"""
         menu = QMenu()
-        title = menu.addAction("窝囊费 · 实时计时")
+        title = menu.addAction("Niumer · 致敬打工人")
         title.setEnabled(False)
         menu.addSeparator()
         self.page_actions = []
@@ -3159,24 +3344,26 @@ class SalaryBar(QWidget):
     def menu_style():
         light = is_light_theme()
         if light:
-            return """
-                QMenu { background-color:#fdfdfd; border:1px solid #d5d5d5;
-                    border-radius:10px; padding:6px 0; color:#222222;
-                    font-family:'Microsoft YaHei'; font-size:12px; }
-                QMenu::item { padding:8px 28px 8px 30px; margin:0px 6px; border-radius:6px; }
-                QMenu::item:selected { background-color:#2b7fff; color:#ffffff; }
-                QMenu::item:disabled { color:#888888; padding:4px 28px 6px 30px; }
-                QMenu::separator { height:1px; background-color:#e3e3e3; margin:5px 12px; }
-            """
-        return """
-            QMenu { background-color:#2a2a2a; border:1px solid #4a4a4a;
-                border-radius:10px; padding:6px 0; color:#eeeeee;
-                font-family:'Microsoft YaHei'; font-size:12px; }
-            QMenu::item { padding:8px 28px 8px 30px; margin:0px 6px; border-radius:6px; }
-            QMenu::item:selected { background-color:#3a6ea5; color:#ffffff; }
-            QMenu::item:disabled { color:#888888; padding:4px 28px 6px 30px; }
-            QMenu::separator { height:1px; background-color:#4a4a4a; margin:5px 12px; }
-        """
+            return '''
+                QMenu { background-color:#FFFFFF; border:1px solid #E5E5E5;
+                    border-radius:4px; padding:4px 0; color:#1F1F1F;
+                    font-family:'Segoe UI', 'Microsoft YaHei'; font-size:12px; }
+                QMenu::item { padding:8px 28px 8px 10px; margin:0; border-radius:2px; }
+                QMenu::item:hover { background-color:#F3F3F3; }
+                QMenu::item:selected { background-color:#E1EFFD; color:#0078D4; }
+                QMenu::item:disabled { color:#A0A0A0; padding:4px 28px 6px 10px; }
+                QMenu::separator { height:1px; background-color:#E5E5E5; margin:6px 10px; }
+            '''
+        return '''
+            QMenu { background-color:#2D2D2D; border:1px solid #404040;
+                border-radius:4px; padding:4px 0; color:#F5F5F5;
+                font-family:'Segoe UI', 'Microsoft YaHei'; font-size:12px; }
+            QMenu::item { padding:8px 28px 8px 10px; margin:0; border-radius:2px; }
+            QMenu::item:hover { background-color:#353535; }
+            QMenu::item:selected { background-color:#1A3A5C; color:#0A84FF; }
+            QMenu::item:disabled { color:#7A7A7A; padding:4px 28px 6px 10px; }
+            QMenu::separator { height:1px; background-color:#404040; margin:6px 10px; }
+        '''
 
     @property
     def rate(self):
@@ -3189,19 +3376,21 @@ class SalaryBar(QWidget):
 
     def colors(self):
         if is_light_theme():
+            # Windows 10 light
             return dict(
-                top=QColor(252, 252, 253, 250), bottom=QColor(240, 242, 245, 248),
-                border=QColor(216, 220, 227, 210), text=QColor(31, 35, 41),
-                sub=QColor(102, 112, 124), faint=QColor(164, 173, 185),
-                green=QColor(16, 185, 129), blue=QColor(43, 127, 255),
-                purple=QColor(139, 92, 246), glow=QColor(16, 185, 129, 42),
+                top=QColor(245, 245, 245, 252), bottom=QColor(235, 235, 235, 250),
+                border=QColor(229, 229, 229, 215), text=QColor(31, 31, 31),
+                sub=QColor(92, 92, 92), faint=QColor(138, 138, 138),
+                green=QColor(0, 120, 212), blue=QColor(0, 120, 212),
+                purple=QColor(88, 101, 242), glow=QColor(0, 120, 212, 42),
             )
+        # Windows 10 dark
         return dict(
-            top=QColor(46, 49, 56, 250), bottom=QColor(35, 38, 43, 248),
-            border=QColor(62, 67, 76, 210), text=QColor(233, 235, 239),
-            sub=QColor(161, 169, 182), faint=QColor(111, 119, 131),
-            green=QColor(16, 185, 129), blue=QColor(76, 141, 255),
-            purple=QColor(167, 139, 250), glow=QColor(16, 185, 129, 55),
+            top=QColor(32, 32, 32, 252), bottom=QColor(25, 25, 25, 250),
+            border=QColor(64, 64, 64, 220), text=QColor(245, 245, 245),
+            sub=QColor(176, 176, 176), faint=QColor(122, 122, 122),
+            green=QColor(10, 132, 255), blue=QColor(10, 132, 255),
+            purple=QColor(94, 115, 229), glow=QColor(10, 132, 255, 55),
         )
 
     def tick(self):
@@ -3223,7 +3412,7 @@ class SalaryBar(QWidget):
         self.setToolTip("")
         due = self.reminders.next_due()
         if self.page == PAGE_SALARY:
-            head = f"窝囊费 ¥{money(self.earned)}（¥{fmt_rate(self.rate)}/秒）"
+            head = f"Niumer ¥{money(self.earned)}（¥{fmt_rate(self.rate)}/秒）"
         elif self.page == PAGE_NOVEL:
             book = self.shelf.current_book()
             head = "摸鱼阅读 · 未导入" if book is None else f"摸鱼阅读 {self.novel.percent():.1f}%"
@@ -3397,7 +3586,6 @@ class SalaryBar(QWidget):
 
     def draw_word_page(self, painter, c):
         word, phonetic, meaning = self.deck.current()
-        h = self.height()
         right = self.width() - DOTS_ZONE
         if not self.spelling:
             # 常态：第一行单词（占满宽度，超长自动省略），第二行音标释义 + 右下进度
@@ -3975,7 +4163,7 @@ class SalaryBar(QWidget):
             except UnicodeDecodeError:
                 continue
             except Exception as e:
-                styled_message(self, "窝囊费", f"读取文件失败：{e}", QMessageBox.Icon.Warning)
+                styled_message(self, "Niumer", f"读取文件失败：{e}", QMessageBox.Icon.Warning)
                 return
         words = self.deck.parse(text)
         self._apply_words(words, f"从文件导入 {len(words)} 个单词", "文件里没读到有效单词，请检查格式。")
@@ -3985,7 +4173,7 @@ class SalaryBar(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle("粘贴词库")
         dlg.setMinimumSize(460, 360)
-        dlg.setStyleSheet(dialog_style())
+        apply_dialog_theme(dlg)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(12)
@@ -4019,14 +4207,9 @@ class SalaryBar(QWidget):
         words = self.deck.parse(text)
         self._apply_words(words, f"已导入 {len(words)} 个单词", "没识别到有效单词，请检查格式。")
 
-    def restore_words(self):
-        """恢复内置高频词库（保留其他词库的进度）。"""
-        self.deck.restore_builtin()
-        self._after_words_changed(f"已切回高频核心词库（{len(self.deck.words)} 个单词）")
-
     def _apply_words(self, words, success_msg, fail_msg):
         if not words:
-            styled_message(self, "窝囊费", fail_msg)
+            styled_message(self, "Niumer", fail_msg)
             return
         self.deck.replace(words)
         self._after_words_changed(success_msg)
@@ -4037,7 +4220,7 @@ class SalaryBar(QWidget):
         self.goto_page(PAGE_WORD)
         self.update_tip()
         self.update()
-        styled_message(self, "窝囊费 · 词库", msg)
+        styled_message(self, "Niumer · 词库", msg)
 
     def toggle_view(self):
         self.show_total = not self.show_total
@@ -4107,16 +4290,18 @@ def acquire_single_instance():
 
 def main():
     set_dpi_awareness()
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("Niumer")
+    # 全局窗口图标：标题栏左上角的 logo。QApplication 级别设置后，
+    # 所有后续创建的对话框/窗口都会自动继承，不用逐个 setWindowIcon。
+    app.setWindowIcon(make_tray_icon())
     if not acquire_single_instance():
-        app = QApplication(sys.argv)
         styled_message(
-            None, "窝囊费",
+            None, "Niumer",
             "已经在运行了 —— 看任务栏右下角那条，不用再开一个。",
         )
         return
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName("窝囊费")
     bar = SalaryBar(app)  # noqa: F841
     sys.exit(app.exec())
 
