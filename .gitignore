@@ -1,0 +1,27 @@
+# ---- 构建产物 ----
+build/
+dist/
+dist[0-9]/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 打包出来的可执行文件走 GitHub Releases 分发，不进仓库
+*.exe
+
+# 历史残留的打包配置，只保留正在用的 窝囊费-slim2.spec
+SalaryTray.spec
+窝囊费.spec
+窝囊费-slim.spec
+窝囊费_test.spec
+
+# 源码包 / 压缩包
+*.zip
+*.7z
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

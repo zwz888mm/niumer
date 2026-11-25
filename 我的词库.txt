@@ -1,0 +1,18 @@
+# 窝囊费 · 词库文件
+# 每行一个单词，两种写法任选（可混用）：
+#   写法一：单词 | 音标 | 中文释义
+#   写法二：单词 中文释义
+# 以 # 开头的行是注释，会被跳过；空行也会跳过。
+# 改完保存，右键托盘图标 → 导入词库（选文件）→ 选本文件即可。
+# 下面把这些示例行删掉，换成你自己的单词。
+
+abandon | /əˈbændən/ | v. 放弃；抛弃
+benefit | /ˈbenɪfɪt/ | n. 益处；v. 受益
+capacity | /kəˈpæsəti/ | n. 容量；能力
+commit | /kəˈmɪt/ | v. 承诺；犯（错）
+efficient | /ɪˈfɪʃnt/ | a. 高效的
+essential | /ɪˈsenʃl/ | a. 必要的；本质的
+implement | /ˈɪmplɪment/ | v. 实施；执行
+maintain | /meɪnˈteɪn/ | v. 维持；保养
+negotiate | /nɪˈɡəʊʃieɪt/ | v. 谈判；协商
+significant | /sɪɡˈnɪfɪkənt/ | a. 重要的；显著的
