@@ -1,4 +1,4 @@
-"""界面自检：小条排版越界、对比度、帮助配图、四个设置面板尺寸。
+"""界面自检：小条排版越界、对比度、帮助配图、五个设置面板尺寸。
 
 跑法（在 desktop-tool 目录下）：
     QT_QPA_PLATFORM=windows python ui_selftest.py
@@ -159,7 +159,7 @@ bar.deck.current = orig_current
 # ---- 3. 帮助页：图片齐不齐 ----
 images = main.HelpDialog.build_images(bar)
 pages = main.help_pages()
-check("帮助页数量 = 10", len(pages) == 10, str(len(pages)))
+check("帮助页数量 = 11", len(pages) == 11, str(len(pages)))
 missing = []
 for title, html in pages:
     for name in re.findall(r"preview/([\w-]+)\.png", html):
@@ -171,7 +171,7 @@ for title, html in pages:
         check(f"“{title}”内容过短", False, f"{len(html)} 字符")
 
 # ---- 4. 设置面板不横向溢出 ----
-for key in ("salary", "words", "remind", "novel"):
+for key in ("salary", "words", "remind", "novel", "appearance"):
     sc = main.SettingsCenter(bar)
     sc.setAttribute(main.Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     sc.show_panel(key)

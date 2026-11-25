@@ -32,13 +32,15 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtGui import QAbstractTextDocumentLayout
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QPushButton, QScrollArea, QSizePolicy, QSpinBox,
     QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
     QSystemTrayIcon, QTextBrowser, QVBoxLayout, QWidget,
 )
+
+from niumer_words import CET4_WORDS, CET6_WORDS, KAOYAN_WORDS
 
 WORK_HOURS_PER_DAY = 8
 WORK_DAYS_PER_MONTH = 22
@@ -46,7 +48,10 @@ SECONDS_PER_MONTH = WORK_DAYS_PER_MONTH * WORK_HOURS_PER_DAY * 60 * 60
 
 PAGE_SALARY, PAGE_WORD, PAGE_NOVEL = 0, 1, 2
 PAGE_COUNT = 3
-PAGE_NAMES = ("工资条 · Niumer", "单词卡 · 偷偷背", "小说 · 摸鱼读")
+PAGE_NAMES = ("工资条 · 窝囊费", "单词卡 · 偷偷背", "小说 · 摸鱼读")
+VERSION = "1.0.0"
+AUTHOR = "200Kg"
+CONTACT_EMAIL = "zwz888123@gmail.com"
 VK_SPACE = 0x20
 FEEDBACK_MS = 1400
 
@@ -81,325 +86,11 @@ ERROR_ALREADY_EXISTS = 183
 MUTEX_NAME = "Local\\Niumer_SingleInstance"
 _single_instance_handle = None
 
-BUILTIN_WORDS = [
-    ("abandon", "/əˈbændən/", "v. 放弃；抛弃"),
-    ("benefit", "/ˈbenɪfɪt/", "n. 益处；v. 受益"),
-    ("campaign", "/kæmˈpeɪn/", "n. 运动；战役"),
-    ("capacity", "/kəˈpæsəti/", "n. 容量；能力"),
-    ("commit", "/kəˈmɪt/", "v. 承诺；犯（错）"),
-    ("compete", "/kəmˈpiːt/", "v. 竞争；比赛"),
-    ("conclude", "/kənˈkluːd/", "v. 得出结论；结束"),
-    ("consequence", "/ˈkɒnsɪkwəns/", "n. 后果；结果"),
-    ("consider", "/kənˈsɪdə/", "v. 考虑；认为"),
-    ("constant", "/ˈkɒnstənt/", "a. 持续的；不变的"),
-    ("contribute", "/kənˈtrɪbjuːt/", "v. 贡献；促成"),
-    ("convince", "/kənˈvɪns/", "v. 说服；使确信"),
-    ("decline", "/dɪˈklaɪn/", "v. 下降；婉拒"),
-    ("dedicate", "/ˈdedɪkeɪt/", "v. 奉献；致力于"),
-    ("definite", "/ˈdefɪnət/", "a. 明确的；确定的"),
-    ("demonstrate", "/ˈdemənstreɪt/", "v. 证明；演示"),
-    ("deserve", "/dɪˈzɜːv/", "v. 值得；应得"),
-    ("determine", "/dɪˈtɜːmɪn/", "v. 决定；查明"),
-    ("distinguish", "/dɪˈstɪŋɡwɪʃ/", "v. 区分；辨别"),
-    ("efficient", "/ɪˈfɪʃnt/", "a. 高效的"),
-    ("eliminate", "/ɪˈlɪmɪneɪt/", "v. 消除；淘汰"),
-    ("emphasis", "/ˈemfəsɪs/", "n. 强调；重点"),
-    ("encounter", "/ɪnˈkaʊntə/", "v. 遭遇；遇到"),
-    ("enhance", "/ɪnˈhɑːns/", "v. 增强；提高"),
-    ("enormous", "/ɪˈnɔːməs/", "a. 巨大的"),
-    ("essential", "/ɪˈsenʃl/", "a. 必要的；本质的"),
-    ("establish", "/ɪˈstæblɪʃ/", "v. 建立；确立"),
-    ("evaluate", "/ɪˈvæljueɪt/", "v. 评估；评价"),
-    ("evident", "/ˈevɪdənt/", "a. 明显的"),
-    ("exhibit", "/ɪɡˈzɪbɪt/", "v. 展示；展览"),
-    ("facilitate", "/fəˈsɪlɪteɪt/", "v. 促进；使便利"),
-    ("generate", "/ˈdʒenəreɪt/", "v. 产生；生成"),
-    ("genuine", "/ˈdʒenjuɪn/", "a. 真正的；真诚的"),
-    ("gradually", "/ˈɡrædʒuəli/", "ad. 逐渐地"),
-    ("identify", "/aɪˈdentɪfaɪ/", "v. 识别；确认"),
-    ("illustrate", "/ˈɪləstreɪt/", "v. 说明；举例"),
-    ("impact", "/ˈɪmpækt/", "n. 影响；冲击"),
-    ("implement", "/ˈɪmplɪment/", "v. 实施；执行"),
-    ("maintain", "/meɪnˈteɪn/", "v. 维持；保养"),
-    ("negotiate", "/nɪˈɡəʊʃieɪt/", "v. 谈判；协商"),
-    ("obvious", "/ˈɒbviəs/", "a. 明显的"),
-    ("participate", "/pɑːˈtɪsɪpeɪt/", "v. 参与"),
-    ("potential", "/pəˈtenʃl/", "a. 潜在的；n. 潜力"),
-    ("recognize", "/ˈrekəɡnaɪz/", "v. 认出；承认"),
-    ("significant", "/sɪɡˈnɪfɪkənt/", "a. 重要的；显著的"),
-    ("sufficient", "/səˈfɪʃnt/", "a. 充足的"),
-]
-
-
-KAOYAN_WORDS = [
-    ("abandon", "/əˈbændən/", "v. 放弃；抛弃"),
-    ("absorb", "/əbˈsɔːb/", "v. 吸收；使全神贯注"),
-    ("abstract", "/ˈæbstrækt/", "a. 抽象的；n. 摘要"),
-    ("academic", "/ˌækəˈdemɪk/", "a. 学术的；学院的"),
-    ("access", "/ˈækses/", "n. 通道；v. 访问"),
-    ("accommodate", "/əˈkɒmədeɪt/", "v. 容纳；适应"),
-    ("accompany", "/əˈkʌmpəni/", "v. 陪伴；伴随"),
-    ("accomplish", "/əˈkʌmplɪʃ/", "v. 完成；实现"),
-    ("account", "/əˈkaʊnt/", "n. 账户；v. 解释"),
-    ("accumulate", "/əˈkjuːmjuleɪt/", "v. 积累；积聚"),
-    ("accurate", "/ˈækjərət/", "a. 准确的"),
-    ("accuse", "/əˈkjuːz/", "v. 指控；指责"),
-    ("acknowledge", "/əkˈnɒlɪdʒ/", "v. 承认；致谢"),
-    ("acquire", "/əˈkwaɪə/", "v. 获得；学到"),
-    ("adapt", "/əˈdæpt/", "v. 适应；改编"),
-    ("adequate", "/ˈædɪkwət/", "a. 足够的；适当的"),
-    ("adjust", "/əˈdʒʌst/", "v. 调整；适应"),
-    ("administer", "/ədˈmɪnɪstə/", "v. 管理；实施"),
-    ("admit", "/ədˈmɪt/", "v. 承认；准许进入"),
-    ("adopt", "/əˈdɒpt/", "v. 采用；收养"),
-    ("advocate", "/ˈædvəkeɪt/", "v. 提倡；n. 拥护者"),
-    ("affect", "/əˈfekt/", "v. 影响；感动"),
-    ("afford", "/əˈfɔːd/", "v. 负担得起"),
-    ("agenda", "/əˈdʒendə/", "n. 议程；日程"),
-    ("aggregate", "/ˈæɡrɪɡət/", "n. 总计；a. 合计的"),
-    ("allocate", "/ˈæləkeɪt/", "v. 分配；拨给"),
-    ("ambiguous", "/æmˈbɪɡjuəs/", "a. 模糊的；歧义的"),
-    ("analyze", "/ˈænəlaɪz/", "v. 分析；分解"),
-    ("anticipate", "/ænˈtɪsɪpeɪt/", "v. 预期；期望"),
-    ("apparent", "/əˈpærənt/", "a. 明显的；表面上的"),
-    ("appeal", "/əˈpiːl/", "v. 呼吁；n. 吸引力"),
-    ("apprehend", "/ˌæprɪˈhend/", "v. 理解；逮捕"),
-    ("approach", "/əˈprəʊtʃ/", "n. 方法；v. 接近"),
-    ("appropriate", "/əˈprəʊpriət/", "a. 适当的"),
-    ("approve", "/əˈpruːv/", "v. 批准；赞成"),
-    ("arbitrary", "/ˈɑːbɪtrəri/", "a. 任意的；武断的"),
-    ("assess", "/əˈses/", "v. 评估；评定"),
-    ("assign", "/əˈsaɪn/", "v. 分配；指派"),
-    ("assume", "/əˈsjuːm/", "v. 假定；承担"),
-    ("assure", "/əˈʃʊə/", "v. 使确信；保证"),
-    ("attain", "/əˈteɪn/", "v. 达到；获得"),
-    ("attempt", "/əˈtempt/", "n./v. 尝试；企图"),
-    ("attribute", "/əˈtrɪbjuːt/", "v. 归因于；n. 属性"),
-    ("authentic", "/ɔːˈθentɪk/", "a. 真实的；可靠的"),
-    ("automate", "/ˈɔːtəmeɪt/", "v. 使自动化"),
-    ("beneficial", "/ˌbenɪˈfɪʃl/", "a. 有益的"),
-    ("bias", "/ˈbaɪəs/", "n. 偏见；v. 使有偏见"),
-    ("boost", "/buːst/", "v. 促进；提高"),
-    ("boundary", "/ˈbaʊndri/", "n. 边界；界限"),
-    ("breakthrough", "/ˈbreɪkθruː/", "n. 突破；重大进展"),
-    ("calculate", "/ˈkælkjuleɪt/", "v. 计算；推测"),
-    ("capable", "/ˈkeɪpəbl/", "a. 有能力的"),
-    ("capacity", "/kəˈpæsəti/", "n. 容量；能力"),
-    ("challenge", "/ˈtʃælɪndʒ/", "n./v. 挑战"),
-    ("characteristic", "/ˌkærəktəˈrɪstɪk/", "n. 特征；a. 典型的"),
-    ("circumstance", "/ˈsɜːkəmstəns/", "n. 环境；情况"),
-    ("commit", "/kəˈmɪt/", "v. 承诺；犯（错）"),
-    ("commodity", "/kəˈmɒdəti/", "n. 商品；日用品"),
-    ("compensate", "/ˈkɒmpenseɪt/", "v. 补偿；弥补"),
-    ("compete", "/kəmˈpiːt/", "v. 竞争；比赛"),
-    ("compile", "/kəmˈpaɪl/", "v. 汇编；编纂"),
-    ("comply", "/kəmˈplaɪ/", "v. 遵守；顺从"),
-    ("conceive", "/kənˈsiːv/", "v. 构想；想象"),
-    ("concentrate", "/ˈkɒnsntreɪt/", "v. 集中；专注"),
-    ("conclude", "/kənˈkluːd/", "v. 得出结论；结束"),
-    ("conduct", "/kənˈdʌkt/", "v. 实施；conduct n. 行为"),
-    ("conference", "/ˈkɒnfərəns/", "n. 会议；讨论会"),
-    ("confirm", "/kənˈfɜːm/", "v. 确认；证实"),
-    ("conform", "/kənˈfɔːm/", "v. 遵守；符合"),
-    ("consequence", "/ˈkɒnsɪkwəns/", "n. 后果；结果"),
-    ("conservative", "/kənˈsɜːvətɪv/", "a. 保守的"),
-    ("considerable", "/kənˈsɪdərəbl/", "a. 相当大的；重要的"),
-    ("consistent", "/kənˈsɪstənt/", "a. 一致的；始终如一的"),
-    ("constant", "/ˈkɒnstənt/", "a. 持续的；不变的"),
-    ("constitute", "/ˈkɒnstɪtjuːt/", "v. 构成；组成"),
-    ("constrain", "/kənˈstreɪn/", "v. 限制；约束"),
-    ("construct", "/kənˈstrʌkt/", "v. 建造；构造"),
-    ("consult", "/kənˈsʌlt/", "v. 咨询；查阅"),
-    ("consume", "/kənˈsjuːm/", "v. 消耗；消费"),
-    ("contemporary", "/kənˈtempərəri/", "a. 当代的；同时代的"),
-    ("contend", "/kənˈtend/", "v. 竞争；主张"),
-    ("contribute", "/kənˈtrɪbjuːt/", "v. 贡献；促成"),
-    ("convince", "/kənˈvɪns/", "v. 说服；使确信"),
-    ("cooperate", "/kəʊˈɒpəreɪt/", "v. 合作；配合"),
-    ("crucial", "/ˈkruːʃl/", "a. 关键的；至关重要的"),
-    ("cumulative", "/ˈkjuːmjələtɪv/", "a. 累积的"),
-    ("decline", "/dɪˈklaɪn/", "v./n. 下降；婉拒"),
-    ("dedicate", "/ˈdedɪkeɪt/", "v. 奉献；致力于"),
-    ("deficiency", "/dɪˈfɪʃnsi/", "n. 缺乏；不足"),
-    ("definite", "/ˈdefɪnət/", "a. 明确的；确定的"),
-    ("demonstrate", "/ˈdemənstreɪt/", "v. 证明；演示"),
-    ("denote", "/dɪˈnəʊt/", "v. 表示；意味着"),
-    ("deserve", "/dɪˈzɜːv/", "v. 值得；应得"),
-    ("determine", "/dɪˈtɜːmɪn/", "v. 决定；查明"),
-    ("diminish", "/dɪˈmɪnɪʃ/", "v. 减少；削弱"),
-    ("distinguish", "/dɪˈstɪŋɡwɪʃ/", "v. 区分；辨别"),
-    ("distribute", "/dɪˈstrɪbjuːt/", "v. 分发；分布"),
-    ("diverse", "/daɪˈvɜːs/", "a. 多样的；不同的"),
-    ("dominant", "/ˈdɒmɪnənt/", "a. 占主导地位的"),
-    ("efficient", "/ɪˈfɪʃnt/", "a. 高效的"),
-    ("eliminate", "/ɪˈlɪmɪneɪt/", "v. 消除；淘汰"),
-    ("emerge", "/iˈmɜːdʒ/", "v. 出现；浮现"),
-    ("emphasis", "/ˈemfəsɪs/", "n. 强调；重点"),
-    ("employ", "/ɪmˈplɔɪ/", "v. 雇用；使用"),
-    ("encounter", "/ɪnˈkaʊntə/", "v./n. 遭遇；遇到"),
-    ("enhance", "/ɪnˈhɑːns/", "v. 增强；提高"),
-    ("enormous", "/ɪˈnɔːməs/", "a. 巨大的"),
-    ("ensure", "/ɪnˈʃʊə/", "v. 确保；保证"),
-    ("essential", "/ɪˈsenʃl/", "a. 必要的；本质的"),
-    ("establish", "/ɪˈstæblɪʃ/", "v. 建立；确立"),
-    ("evaluate", "/ɪˈvæljueɪt/", "v. 评估；评价"),
-    ("evident", "/ˈevɪdənt/", "a. 明显的"),
-    ("exceed", "/ɪkˈsiːd/", "v. 超过；超出"),
-    ("exclude", "/ɪkˈskluːd/", "v. 排除；不包括"),
-    ("exhibit", "/ɪɡˈzɪbɪt/", "v. 展示；n. 展品"),
-    ("expand", "/ɪkˈspænd/", "v. 扩大；膨胀"),
-    ("expectation", "/ˌekspekˈteɪʃn/", "n. 期望；预期"),
-    ("explicit", "/ɪkˈsplɪsɪt/", "a. 明确的；清楚的"),
-    ("exploit", "/ɪkˈsplɔɪt/", "v. 利用；剥削"),
-    ("facilitate", "/fəˈsɪlɪteɪt/", "v. 促进；使便利"),
-    ("fundamental", "/ˌfʌndəˈmentl/", "a. 基本的；根本的"),
-    ("generate", "/ˈdʒenəreɪt/", "v. 产生；生成"),
-    ("genuine", "/ˈdʒenjuɪn/", "a. 真正的；真诚的"),
-    ("gradually", "/ˈɡrædʒuəli/", "ad. 逐渐地"),
-    ("guarantee", "/ˌɡærənˈtiː/", "v./n. 保证；担保"),
-    ("identical", "/aɪˈdentɪkl/", "a. 完全相同的"),
-    ("identify", "/aɪˈdentɪfaɪ/", "v. 识别；确认"),
-    ("illustrate", "/ˈɪləstreɪt/", "v. 说明；举例"),
-    ("impact", "/ˈɪmpækt/", "n. 影响；冲击"),
-    ("implement", "/ˈɪmplɪment/", "v. 实施；执行"),
-    ("imply", "/ɪmˈplaɪ/", "v. 暗示；意味着"),
-    ("impose", "/ɪmˈpəʊz/", "v. 强加；征收"),
-    ("incentive", "/ɪnˈsentɪv/", "n. 激励；动机"),
-    ("indicate", "/ˈɪndɪkeɪt/", "v. 表明；指出"),
-    ("individual", "/ˌɪndɪˈvɪdʒuəl/", "n. 个人；a. 个别的"),
-    ("inevitable", "/ɪnˈevɪtəbl/", "a. 不可避免的"),
-    ("influence", "/ˈɪnfluəns/", "n./v. 影响"),
-    ("innovation", "/ˌɪnəˈveɪʃn/", "n. 创新；革新"),
-    ("insight", "/ˈɪnsaɪt/", "n. 洞察力；见解"),
-    ("insist", "/ɪnˈsɪst/", "v. 坚持；坚决要求"),
-    ("integrate", "/ˈɪntɪɡreɪt/", "v. 整合；使成整体"),
-    ("intend", "/ɪnˈtend/", "v. 打算；意图"),
-    ("interpret", "/ɪnˈtɜːprɪt/", "v. 解释；口译"),
-    ("interval", "/ˈɪntəvl/", "n. 间隔；间距"),
-    ("introduce", "/ˌɪntrəˈdjuːs/", "v. 介绍；引进"),
-    ("investigate", "/ɪnˈvestɪɡeɪt/", "v. 调查；研究"),
-    ("involve", "/ɪnˈvɒlv/", "v. 涉及；使参与"),
-    ("isolate", "/ˈaɪsəleɪt/", "v. 隔离；孤立"),
-    ("justify", "/ˈdʒʌstɪfaɪ/", "v. 证明…正当；辩护"),
-    ("maintain", "/meɪnˈteɪn/", "v. 维持；保养"),
-    ("majority", "/məˈdʒɒrəti/", "n. 多数；大多数"),
-    ("manipulate", "/məˈnɪpjuleɪt/", "v. 操纵；控制"),
-    ("mechanism", "/ˈmekənɪzəm/", "n. 机制；机械装置"),
-    ("minimize", "/ˈmɪnɪmaɪz/", "v. 使最小化"),
-    ("moderate", "/ˈmɒdərət/", "a. 适度的；温和的"),
-    ("modify", "/ˈmɒdɪfaɪ/", "v. 修改；调整"),
-    ("monitor", "/ˈmɒnɪtə/", "v. 监控；n. 显示器"),
-    ("motivate", "/ˈməʊtɪveɪt/", "v. 激励；促进"),
-    ("negotiate", "/nɪˈɡəʊʃieɪt/", "v. 谈判；协商"),
-    ("nevertheless", "/ˌnevəðəˈles/", "ad. 然而；不过"),
-    ("objective", "/əbˈdʒektɪv/", "n. 目标；a. 客观的"),
-    ("obvious", "/ˈɒbviəs/", "a. 明显的"),
-    ("occupy", "/ˈɒkjupaɪ/", "v. 占据；占用"),
-    ("occurred", "/əˈkɜːd/", "v. 发生；出现"),
-    ("offset", "/ˈɒfset/", "v. 抵消；补偿"),
-    ("participate", "/pɑːˈtɪsɪpeɪt/", "v. 参与"),
-    ("particular", "/pəˈtɪkjələ/", "a. 特定的；讲究的"),
-    ("perceive", "/pəˈsiːv/", "v. 感知；察觉"),
-    ("perspective", "/pəˈspektɪv/", "n. 视角；观点"),
-    ("phenomenon", "/fəˈnɒmɪnən/", "n. 现象"),
-    ("potential", "/pəˈtenʃl/", "a. 潜在的；n. 潜力"),
-    ("precise", "/prɪˈsaɪs/", "a. 精确的"),
-    ("predict", "/prɪˈdɪkt/", "v. 预测；预言"),
-    ("prejudice", "/ˈpredʒudɪs/", "n. 偏见；成见"),
-    ("preliminary", "/prɪˈlɪmɪnəri/", "a. 初步的；预备的"),
-    ("presume", "/prɪˈzjuːm/", "v. 假定；推测"),
-    ("prevail", "/prɪˈveɪl/", "v. 盛行；获胜"),
-    ("primary", "/ˈpraɪməri/", "a. 主要的；初级的"),
-    ("principle", "/ˈprɪnsəpl/", "n. 原则；原理"),
-    ("priority", "/praɪˈɒrəti/", "n. 优先；优先级"),
-    ("proceed", "/prəˈsiːd/", "v. 继续进行"),
-    ("professional", "/prəˈfeʃənl/", "a. 专业的；n. 专业人士"),
-    ("promote", "/prəˈməʊt/", "v. 促进；晋升"),
-    ("proportion", "/prəˈpɔːʃn/", "n. 比例；部分"),
-    ("propose", "/prəˈpəʊz/", "v. 提议；提出"),
-    ("prospect", "/ˈprɒspekt/", "n. 前景；前途"),
-    ("prove", "/pruːv/", "v. 证明；证实"),
-    ("pursue", "/pəˈsjuː/", "v. 追求；从事"),
-    ("react", "/riˈækt/", "v. 反应；反抗"),
-    ("reasonable", "/ˈriːznəbl/", "a. 合理的；公道的"),
-    ("recognize", "/ˈrekəɡnaɪz/", "v. 认出；承认"),
-    ("recommend", "/ˌrekəˈmend/", "v. 推荐；建议"),
-    ("reduce", "/rɪˈdjuːs/", "v. 减少；降低"),
-    ("reflect", "/rɪˈflekt/", "v. 反映；反思"),
-    ("reform", "/rɪˈfɔːm/", "n./v. 改革；改造"),
-    ("regard", "/rɪˈɡɑːd/", "v. 认为；n. 关注"),
-    ("register", "/ˈredʒɪstə/", "v. 登记；注册"),
-    ("reinforce", "/ˌriːɪnˈfɔːs/", "v. 加强；强化"),
-    ("reject", "/rɪˈdʒekt/", "v. 拒绝；驳回"),
-    ("relevant", "/ˈreləvənt/", "a. 相关的；切题的"),
-    ("reliable", "/rɪˈlaɪəbl/", "a. 可靠的"),
-    ("relieve", "/rɪˈliːv/", "v. 减轻；缓解"),
-    ("reluctant", "/rɪˈlʌktənt/", "a. 不情愿的"),
-    ("remarkable", "/rɪˈmɑːkəbl/", "a. 显著的；非凡的"),
-    ("remedy", "/ˈremədi/", "n. 补救；v. 纠正"),
-    ("remote", "/rɪˈməʊt/", "a. 遥远的；远程的"),
-    ("remove", "/rɪˈmuːv/", "v. 移除；消除"),
-    ("render", "/ˈrendə/", "v. 使成为；提供"),
-    ("replace", "/rɪˈpleɪs/", "v. 取代；更换"),
-    ("represent", "/ˌreprɪˈzent/", "v. 代表；表示"),
-    ("require", "/rɪˈkwaɪə/", "v. 需要；要求"),
-    ("resemble", "/rɪˈzembl/", "v. 相似；像"),
-    ("reserve", "/rɪˈzɜːv/", "v. 保留；预订"),
-    ("resist", "/rɪˈzɪst/", "v. 抵抗；忍住"),
-    ("resolve", "/rɪˈzɒlv/", "v. 解决；决定"),
-    ("resource", "/rɪˈsɔːs/", "n. 资源；财力"),
-    ("respond", "/rɪˈspɒnd/", "v. 回应；反应"),
-    ("restore", "/rɪˈstɔː/", "v. 恢复；修复"),
-    ("restrict", "/rɪˈstrɪkt/", "v. 限制；约束"),
-    ("retain", "/rɪˈteɪn/", "v. 保持；保留"),
-    ("reveal", "/rɪˈviːl/", "v. 揭示；透露"),
-    ("reverse", "/rɪˈvɜːs/", "v. 颠倒；n. 相反"),
-    ("revise", "/rɪˈvaɪz/", "v. 修订；复习"),
-    ("significant", "/sɪɡˈnɪfɪkənt/", "a. 重要的；显著的"),
-    ("similar", "/ˈsɪmələ/", "a. 相似的"),
-    ("simulate", "/ˈsɪmjuleɪt/", "v. 模拟；模仿"),
-    ("sophisticated", "/səˈfɪstɪkeɪtɪd/", "a. 复杂的；精密的"),
-    ("specific", "/spəˈsɪfɪk/", "a. 具体的；特定的"),
-    ("speculate", "/ˈspekjuleɪt/", "v. 推测；投机"),
-    ("stable", "/ˈsteɪbl/", "a. 稳定的"),
-    ("standard", "/ˈstændəd/", "n. 标准；a. 标准的"),
-    ("strategy", "/ˈstrætədʒi/", "n. 策略；战略"),
-    ("strengthen", "/ˈstreŋθən/", "v. 加强；巩固"),
-    ("subsequent", "/ˈsʌbsɪkwənt/", "a. 随后的；后来的"),
-    ("substantial", "/səbˈstænʃl/", "a. 大量的；实质的"),
-    ("substitute", "/ˈsʌbstɪtjuːt/", "v. 代替；n. 替代品"),
-    ("sufficient", "/səˈfɪʃnt/", "a. 充足的"),
-    ("sustain", "/səˈsteɪn/", "v. 维持；支撑"),
-    ("tackle", "/ˈtækl/", "v. 处理；应对"),
-    ("tendency", "/ˈtendənsi/", "n. 趋势；倾向"),
-    ("transform", "/trænsˈfɔːm/", "v. 转变；改造"),
-    ("transition", "/trænˈzɪʃn/", "n. 过渡；转变"),
-    ("transmit", "/trænzˈmɪt/", "v. 传输；传播"),
-    ("tremendous", "/trəˈmendəs/", "a. 巨大的；极好的"),
-    ("trigger", "/ˈtrɪɡə/", "v. 引发；触发"),
-    ("ultimate", "/ˈʌltɪmət/", "a. 最终的；根本的"),
-    ("undermine", "/ˌʌndəˈmaɪn/", "v. 破坏；削弱"),
-    ("undertake", "/ˌʌndəˈteɪk/", "v. 承担；着手"),
-    ("uniform", "/ˈjuːnɪfɔːm/", "a. 统一的；n. 制服"),
-    ("unique", "/juˈniːk/", "a. 独特的；唯一的"),
-    ("utilize", "/ˈjuːtəlaɪz/", "v. 利用"),
-    ("vary", "/ˈveəri/", "v. 变化；不同"),
-    ("vast", "/vɑːst/", "a. 巨大的；广阔的"),
-    ("verify", "/ˈverɪfaɪ/", "v. 核实；证明"),
-    ("viable", "/ˈvaɪəbl/", "a. 可行的"),
-    ("vital", "/ˈvaɪtl/", "a. 至关重要的；有活力的"),
-    ("volatile", "/ˈvɒlətaɪl/", "a. 易变的；不稳定的"),
-    ("widespread", "/ˈwaɪdspred/", "a. 广泛的；普遍的"),
-    ("withdraw", "/wɪðˈdrɔː/", "v. 撤回；退出"),
-    ("witness", "/ˈwɪtnəs/", "n. 目击者；v. 见证"),
-    ("yield", "/jiːld/", "v. 产生；屈服"),
-]
-
-
 # 词库目录：id -> (显示名, 词表)
 DECK_LIBRARY = {
-    "basic": ("高频核心词", BUILTIN_WORDS),
-    "kaoyan": ("考研核心词", KAOYAN_WORDS),
+    "cet4": ("四级词汇", CET4_WORDS),
+    "cet6": ("六级词汇", CET6_WORDS),
+    "kaoyan": ("考研英语", KAOYAN_WORDS),
 }
 
 
@@ -607,7 +298,7 @@ def make_tray_icon() -> QIcon:
 
 
 class WordDeck:
-    """词库与学习进度；支持内置高频/考研/自定义，进度按词库独立保存。
+    """词库与学习进度；内置四级 / 六级 / 考研三套，进度按词库独立保存。
 
     每个词的学习状态：0=未学 1=模糊(答错过) 2=已掌握(答对过且未再错)。
     状态按「单词」为键存 QSettings，切换词库互不干扰。
@@ -615,63 +306,30 @@ class WordDeck:
 
     def __init__(self, settings):
         self.settings = settings
-        self.deck_id = str(settings.value("deck_id", "basic"))
-        # 兼容旧数据：之前词库存 word_list
-        legacy = settings.value("word_list", "")
-        if self.deck_id == "custom" and not legacy:
-            self.deck_id = "basic"
-        if self.deck_id not in DECK_LIBRARY and self.deck_id != "custom":
-            self.deck_id = "basic"
-        self.custom_words = self.parse(legacy) if legacy else []
+        self.deck_id = str(settings.value("deck_id", "cet4"))
+        if self.deck_id not in DECK_LIBRARY:
+            self.deck_id = "cet4"
 
         self.words = self._source_words()
-        if not self.words:
-            self.words = list(BUILTIN_WORDS)
-            self.deck_id = "basic"
-
         self.index = self._load_index()
         self.states = self._load_states()   # word -> [status, correct, wrong]
         self.combo = 0
 
     # ---------- 词库源 ----------
     def _source_words(self):
-        if self.deck_id == "custom":
-            return list(self.custom_words)
         return list(DECK_LIBRARY[self.deck_id][1])
 
     @property
     def deck_name(self):
-        if self.deck_id == "custom":
-            return "自定义词库"
         return DECK_LIBRARY[self.deck_id][0]
-
-    @staticmethod
-    def parse(text):
-        out = []
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) >= 3:
-                out.append((parts[0], parts[1], parts[2]))
-            else:
-                sp = line.split(None, 1)
-                if len(sp) == 2 and sp[0].isascii():
-                    out.append((sp[0], "", sp[1]))
-        return out
 
     # ---------- 持久化 ----------
     def _key(self, name):
         return f"deck_{self.deck_id}_{name}"
 
     def _load_index(self):
-        raw = self.settings.value(self._key("index"), "")
-        if raw == "":
-            # 兼容旧键
-            raw = self.settings.value("word_index", 0)
         try:
-            return int(raw) % len(self.words)
+            return int(self.settings.value(self._key("index"), 0)) % len(self.words)
         except (ValueError, TypeError):
             return 0
 
@@ -690,18 +348,12 @@ class WordDeck:
         return states
 
     def _save_states(self):
-        # 兼容旧 mastered 键
         parts = [f"{w},{v[0]},{v[1]},{v[2]}" for w, v in self.states.items()]
         self.settings.setValue(self._key("states"), ";".join(parts))
-        self.settings.setValue("word_mastered", self.mastered_count)
 
     def save(self):
         self.settings.setValue("deck_id", self.deck_id)
         self.settings.setValue(self._key("index"), self.index)
-        if self.deck_id == "custom":
-            self.settings.setValue(
-                "word_list", "\n".join("|".join(w) for w in self.custom_words)
-            )
         self._save_states()
 
     # ---------- 学习状态 ----------
@@ -763,9 +415,7 @@ class WordDeck:
     # ---------- 词库操作 ----------
     def select_deck(self, deck_id):
         """切换词库并加载对应进度。"""
-        if deck_id == "custom" and not self.custom_words:
-            return False
-        if deck_id != "custom" and deck_id not in DECK_LIBRARY:
+        if deck_id not in DECK_LIBRARY:
             return False
         self.settings.setValue("deck_id", deck_id)
         self.deck_id = deck_id
@@ -773,23 +423,6 @@ class WordDeck:
         self.index = self._load_index()
         self.states = self._load_states()
         self.combo = 0
-        return True
-
-    def replace(self, words):
-        """把自定义词库整体替换并切过去；进度归零。"""
-        if not words:
-            return False
-        self.custom_words = list(words)
-        self.settings.setValue("word_list", "\n".join("|".join(w) for w in words))
-        # 自定义词库进度清零
-        self.settings.remove("deck_custom_index")
-        self.settings.remove("deck_custom_states")
-        self.deck_id = "custom"
-        self.words = self._source_words()
-        self.index = 0
-        self.states = {}
-        self.combo = 0
-        self.save()
         return True
 
     def reset_progress(self):
@@ -1186,11 +819,11 @@ def dialog_style():
         QGroupBox::title {{ subcontrol-origin:margin; left:14px; padding:0 6px; color:{p['text']}; }}
 
         /* ===== 输入框 ===== */
-        QDoubleSpinBox, QSpinBox, QLineEdit, QComboBox, QPlainTextEdit {{
+        QDoubleSpinBox, QSpinBox, QLineEdit, QComboBox {{
             background:{p['card']}; border:1px solid {p['border']}; border-radius:4px;
             padding:5px 10px; color:{p['text']}; selection-background-color:{p['accent']};
             selection-color:#ffffff; }}
-        QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{
+        QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus, QComboBox:focus {{
             border:2px solid {p['accent']}; padding:4px 9px; }}
         QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{ border:none; background:transparent; padding:0; }}
         QComboBox::drop-down {{ border:none; width:20px; }}
@@ -1253,7 +886,6 @@ def dialog_style():
             padding:4px 6px; border-radius:3px; }}
         QFileDialog {{ background:{p['bg']}; color:{p['text']}; }}
         QMessageBox {{ background:{p['bg']}; color:{p['text']}; }}
-        QDialogButtonBox QPushButton {{ min-width:80px; }}
     """
 
 
@@ -1499,7 +1131,7 @@ class RatioBar(QWidget):
         painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
         if self.ratio > 0:
             painter.setBrush(QColor(p["accent"]))
-            # 进度很低时（比如 261 个词背了 2 个）也要留一节看得见的头
+            # 进度很低时（比如 2600 个词背了 2 个）也要留一节看得见的头
             painter.drawRoundedRect(
                 QRectF(0, 0, max(h * 1.3, w * self.ratio), h), r, r)
         painter.end()
@@ -1735,7 +1367,7 @@ class SalaryPanel(_BasePanel):
 
 
 class WordsPanel(_BasePanel):
-    """单词卡面板：词库选择、学习进度、续背与词库管理。"""
+    """单词卡面板：词库选择、学习进度与续背。"""
 
     def __init__(self, bar):
         super().__init__(bar)
@@ -1757,9 +1389,9 @@ class WordsPanel(_BasePanel):
         row = QHBoxLayout()
         row.setSpacing(10)
         for did, label in (
-            ("basic", "高频核心词"),
-            ("kaoyan", "考研核心词"),
-            ("custom", "自定义词库"),
+            ("cet4", "四级词汇"),
+            ("cet6", "六级词汇"),
+            ("kaoyan", "考研英语"),
         ):
             btn = QPushButton(label)
             btn.setCheckable(True)
@@ -1801,29 +1433,6 @@ class WordsPanel(_BasePanel):
             nav.addWidget(b)
         gl.addLayout(nav)
         root.addWidget(prog)
-
-        # 自定义词库卡
-        custom = QFrame()
-        custom.setObjectName("Card")
-        cl = QVBoxLayout(custom)
-        cl.setContentsMargins(16, 14, 16, 14)
-        cl.setSpacing(10)
-        hint = QLabel("自定义词库格式：单词 | 音标 | 释义　　或　　单词 释义\n以 # 开头的行会跳过")
-        hint.setObjectName("Hint")
-        hint.setWordWrap(True)
-        cl.addWidget(hint)
-        row2 = QHBoxLayout()
-        row2.setSpacing(10)
-        b1 = QPushButton("从文件导入...")
-        b2 = QPushButton("粘贴文本...")
-        b1.clicked.connect(self.on_import)
-        b2.clicked.connect(self.on_paste)
-        for b in (b1, b2):
-            b.setMinimumHeight(36)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            row2.addWidget(b)
-        cl.addLayout(row2)
-        root.addWidget(custom)
         root.addStretch(1)
 
         self.refresh()
@@ -1847,18 +1456,14 @@ class WordsPanel(_BasePanel):
                 btn.setObjectName("")
             btn.setStyleSheet("")
             btn.style().polish(btn)
-        if deck.deck_id == "custom":
-            self.deck_hint.setText(f"当前使用自定义词库（{len(deck.words)} 词）")
-        elif deck.deck_id == "kaoyan":
-            self.deck_hint.setText("考研核心词 261 个，按字母序排列，进度独立保存")
+        if deck.deck_id == "kaoyan":
+            self.deck_hint.setText(f"考研英语 {len(deck.words)} 词，按字母序排列，进度独立保存")
+        elif deck.deck_id == "cet6":
+            self.deck_hint.setText(f"六级词汇 {len(deck.words)} 词，按字母序排列，进度独立保存")
         else:
-            self.deck_hint.setText("高频核心词 46 个，进度独立保存")
+            self.deck_hint.setText(f"四级词汇 {len(deck.words)} 词，按字母序排列，进度独立保存")
 
     def on_deck(self, deck_id):
-        if deck_id == "custom" and not self.bar.deck.custom_words:
-            styled_message(self, "Niumer", "还没有自定义词库，请先从文件或粘贴导入。")
-            self.refresh()
-            return
         self.bar.deck.select_deck(deck_id)
         self.bar.reset_spelling_state()
         self.bar.update_tip()
@@ -1887,14 +1492,6 @@ class WordsPanel(_BasePanel):
         self.bar.update()
         self.refresh()
         styled_message(self, "Niumer", "当前词库学习进度已清空。")
-
-    def on_import(self):
-        self.bar.import_words()
-        self.refresh()
-
-    def on_paste(self):
-        self.bar.paste_words()
-        self.refresh()
 
     def apply(self):
         self.refresh()
@@ -2704,8 +2301,9 @@ def help_pages():
 
     word = (
         h("平时看什么")
-        + p("第一行是单词，第二行是音标和释义，右下角浅灰的 12/261 是学习进度。"
-            "默认 46 个高频词，可以换成 261 个考研词，也能导入自己的词表。")
+        + p(f"第一行是单词，第二行是音标和释义，右下角浅灰的 12/{len(CET4_WORDS)} 是学习进度。"
+            f"内置四级 {len(CET4_WORDS)} 词、六级 {len(CET6_WORDS)} 词、"
+            f"考研 {len(KAOYAN_WORDS)} 词，在设置里点一下就能换。")
         + img("word", "第二页：单词 + 音标释义 + 右下角进度。")
         + h("默写：把单词盖住自己拼一遍")
         + ol([
@@ -2719,11 +2317,11 @@ def help_pages():
         + note("对错都会记进学习档案：答错的词记成「待巩固」，之后在设置里点「跳到未掌握」会优先带你去这些词。")
         + h("换词库")
         + table([
-            ("高频核心词", "46 个常见词，默认"),
-            ("考研核心词", "261 个考研高频词，带音标释义"),
-            ("自定义词库", "从 txt 导入或直接粘贴，一行一个词"),
+            ("四级词汇", f"{len(CET4_WORDS)} 词，按字母序排列"),
+            ("六级词汇", f"{len(CET6_WORDS)} 词，按字母序排列"),
+            ("考研英语", f"{len(KAOYAN_WORDS)} 词，按字母序排列"),
         ])
-        + note("三个词库的学习进度分别保存，切换不会互相覆盖。")
+        + note("三套词库的学习进度分别保存，切换不会互相覆盖。")
     )
 
     novel = (
@@ -2780,14 +2378,15 @@ def help_pages():
     )
 
     settings = (
-        h("四个面板")
-        + p("右键小条 → 设置中心。左边四张卡选功能，右边改参数，底部两个按钮。")
+        h("五个面板")
+        + p("右键小条 → 设置中心。左边五张卡选功能，右边改参数，底部两个按钮。")
         + img("settings", "设置中心：左侧选功能，右侧改参数，右下角「保存并关闭」。", 700)
         + table([
             ("工资条", "月薪、暂停/继续、显示累计或每秒、重置累计"),
-            ("单词卡", "换词库、看学习进度、续背/跳到未掌握/重置、导入自定义词库"),
+            ("单词卡", "换词库（四级/六级/考研）、看进度、续背/跳到未掌握/重置"),
             ("健康提醒", "三类提醒的开关、间隔、文案，以及提醒时段"),
             ("摸鱼阅读", "书架、导入 txt、正文字号、滚动速度、天气伪装"),
+            ("外观", "深色 / 浅色主题，切换后立即生效"),
         ])
         + note("改完一定要点右下角「保存并关闭」。直接点窗口右上角的 × 关闭不会保存。")
         + note("设置中心左下角还有「使用帮助」，随时能翻到这里。")
@@ -2866,7 +2465,20 @@ def help_pages():
             "断网时会继续用上一次取到的天气。")
         + h("支持什么系统？占多少资源？")
         + p("Windows 10（1809 及以上）和 Windows 11，64 位；不支持 Win7/8、32 位、ARM 版。"
-            "exe 约 25MB，常驻内存六七十兆；平时每秒刷一次数字，小说滚动时才跑 33ms 一帧。")
+            "exe 约 27MB，常驻内存六七十兆；平时每秒刷一次数字，小说滚动时才跑 33ms 一帧。")
+    )
+
+    about = (
+        h("版本")
+        + p(f"Niumer {VERSION}　by {AUTHOR}")
+        + h("联系我")
+        + p(f"邮箱：{CONTACT_EMAIL}")
+        + p("用着有问题、想加功能，或者只是想吐槽，都可以发邮件给我，看到就会回。")
+        + h("关于词库")
+        + p("四级 / 六级 / 考研三套词表来自 qwerty-learner 开源词库，"
+            "已过滤短语、统一音标格式并按字母序排列。")
+        + h("关于数据")
+        + p("设置、单词进度、书架都只存在本机，不联网上传（天气查询除外）。")
     )
 
     pages = (
@@ -2880,6 +2492,7 @@ def help_pages():
         ("快捷键与手势", keypage),
         ("数据与迁移", data),
         ("常见问题", faq),
+        ("关于与联系", about),
     )
     return [
         (title, f"<html><body style='font-size:13px; color:{text};'>{body}</body></html>")
@@ -2956,6 +2569,9 @@ class HelpDialog(QDialog):
         head.addWidget(head_title)
         head.addWidget(head_sub)
         head.addStretch(1)
+        ver = QLabel(f"v{VERSION} · by {AUTHOR}")
+        ver.setObjectName("Hint")
+        head.addWidget(ver)
         outer.addLayout(head)
 
         body = QHBoxLayout()
@@ -3093,6 +2709,9 @@ class SettingsCenter(QDialog):
         head.addWidget(head_title)
         head.addWidget(head_sub)
         head.addStretch(1)
+        ver = QLabel(f"v{VERSION} · by {AUTHOR}")
+        ver.setObjectName("Hint")
+        head.addWidget(ver)
         outer.addLayout(head)
 
         # 主体：左导航 + 右面板
@@ -3322,7 +2941,7 @@ class SalaryBar(QWidget):
     def build_menu(self):
         """精简菜单：只留页面切换、设置中心、隐藏、退出。"""
         menu = QMenu()
-        title = menu.addAction("Niumer · 致敬打工人")
+        title = menu.addAction(f"Niumer v{VERSION} · by {AUTHOR}")
         title.setEnabled(False)
         menu.addSeparator()
         self.page_actions = []
@@ -4147,81 +3766,6 @@ class SalaryBar(QWidget):
         """详细使用说明：替代原来鼠标一停就弹的那块提示。"""
         HelpDialog(self).exec()
 
-    def import_words(self):
-        """从 txt 文件导入词库。支持 UTF-8 / GBK 编码。"""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择词库文件", "", "文本文件 (*.txt);;所有文件 (*)"
-        )
-        if not path:
-            return
-        text = ""
-        for enc in ("utf-8-sig", "utf-8", "gbk"):
-            try:
-                with open(path, "r", encoding=enc) as f:
-                    text = f.read()
-                break
-            except UnicodeDecodeError:
-                continue
-            except Exception as e:
-                styled_message(self, "Niumer", f"读取文件失败：{e}", QMessageBox.Icon.Warning)
-                return
-        words = self.deck.parse(text)
-        self._apply_words(words, f"从文件导入 {len(words)} 个单词", "文件里没读到有效单词，请检查格式。")
-
-    def paste_words(self):
-        """直接粘贴词库文本导入。"""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("粘贴词库")
-        dlg.setMinimumSize(460, 360)
-        apply_dialog_theme(dlg)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(18, 18, 18, 14)
-        layout.setSpacing(12)
-        head = QLabel("每行一个词，两种写法可混用")
-        head.setObjectName("Title")
-        layout.addWidget(head)
-        hint = QLabel("单词 | 音标 | 释义　　或　　单词 释义\n以 # 开头的行会跳过")
-        hint.setObjectName("Hint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-        edit = QPlainTextEdit()
-        edit.setPlaceholderText("abandon | /əˈbændən/ | v. 放弃；抛弃\nbenefit 益处；受益")
-        edit.setPlainText("")
-        layout.addWidget(edit)
-        buttons = QDialogButtonBox()
-        ok = buttons.addButton(QDialogButtonBox.StandardButton.Ok)
-        cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
-        ok.setObjectName("Primary")
-        ok.setText("导入")
-        cancel.setText("取消")
-        ok.setMinimumHeight(34)
-        cancel.setMinimumHeight(34)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        text = edit.toPlainText().strip()
-        if not text:
-            return
-        words = self.deck.parse(text)
-        self._apply_words(words, f"已导入 {len(words)} 个单词", "没识别到有效单词，请检查格式。")
-
-    def _apply_words(self, words, success_msg, fail_msg):
-        if not words:
-            styled_message(self, "Niumer", fail_msg)
-            return
-        self.deck.replace(words)
-        self._after_words_changed(success_msg)
-
-    def _after_words_changed(self, msg):
-        # 词库变了，复位默写状态
-        self.reset_spelling_state()
-        self.goto_page(PAGE_WORD)
-        self.update_tip()
-        self.update()
-        styled_message(self, "Niumer · 词库", msg)
-
     def toggle_view(self):
         self.show_total = not self.show_total
         self.update()
@@ -4288,21 +3832,166 @@ def acquire_single_instance():
     return True
 
 
+class StartupSplash(QWidget):
+    """启动屏：双击后尽快出现，避免解压/初始化那几秒看起来像没启动。
+
+    只在启动阶段存在，主界面就绪后自动淡出；不抢焦点、不进任务栏。
+    """
+
+    def __init__(self):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFixedSize(440, 250)
+        self.light = is_light_theme()
+        self.phase = 0.0
+        self._fade = None
+        logo_path = _resource_path("Niumer-head.png")
+        self.logo = QPixmap(logo_path) if os.path.exists(logo_path) else QPixmap()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)
+        self._center()
+
+    def _center(self):
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        geo = screen.availableGeometry()
+        self.move(geo.center() - self.rect().center())
+
+    def _tick(self):
+        self.phase = (self.phase + 0.02) % 1.0
+        self.update()
+
+    def finish(self, elapsed_ms):
+        """主界面已就绪：至少显示满 0.9 秒再淡出，避免闪一下就没。"""
+        QTimer.singleShot(max(0, 900 - int(elapsed_ms)), self._fade_out)
+
+    def _fade_out(self):
+        self._timer.stop()
+        anim = QVariantAnimation(self)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setDuration(220)
+        anim.valueChanged.connect(lambda v: self.setWindowOpacity(float(v)))
+        anim.finished.connect(self.close)
+        anim.start()
+        self._fade = anim
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        if self.light:
+            bg, border = QColor("#f7f8fa"), QColor("#e2e5e9")
+            text, sub, hint = QColor("#1a1d22"), QColor("#8b929c"), QColor("#5c646f")
+            track, accent = QColor("#e6e9ee"), QColor("#0078d4")
+        else:
+            bg, border = QColor("#1e2228"), QColor("#333a44")
+            text, sub, hint = QColor("#f3f5f8"), QColor("#9aa4b0"), QColor("#c3c9d2")
+            track, accent = QColor("#2f3641"), QColor("#4c8dff")
+
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
+        p.fillPath(path, bg)
+        p.setPen(QPen(border, 1))
+        p.drawPath(path)
+
+        logo_rect = QRectF(36, 34, 64, 64)
+        if not self.logo.isNull():
+            clip = QPainterPath()
+            clip.addRoundedRect(logo_rect, 14, 14)
+            p.save()
+            p.setClipPath(clip)
+            p.drawPixmap(logo_rect.toRect(), self.logo)
+            p.restore()
+        else:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(accent)
+            p.drawRoundedRect(logo_rect, 14, 14)
+
+        title_font = QFont("Microsoft YaHei")
+        title_font.setPixelSize(30)
+        title_font.setBold(True)
+        p.setFont(title_font)
+        p.setPen(text)
+        p.drawText(
+            QRectF(116, 32, 290, 40),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Niumer",
+        )
+
+        sub_font = QFont("Microsoft YaHei")
+        sub_font.setPixelSize(14)
+        p.setFont(sub_font)
+        p.setPen(sub)
+        p.drawText(
+            QRectF(117, 72, 290, 24),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            f"v{VERSION} · by {AUTHOR}",
+        )
+
+        status_font = QFont("Microsoft YaHei")
+        status_font.setPixelSize(15)
+        status_font.setBold(True)
+        p.setFont(status_font)
+        p.setPen(hint)
+        p.drawText(
+            QRectF(36, 140, 320, 26),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "正在启动…",
+        )
+
+        tip_font = QFont("Microsoft YaHei")
+        tip_font.setPixelSize(13)
+        p.setFont(tip_font)
+        p.setPen(sub)
+        p.drawText(
+            QRectF(36, 168, 368, 22),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "首次启动要解压组件，稍等两三秒",
+        )
+
+        bar_rect = QRectF(36, 212, 368, 4)
+        track_path = QPainterPath()
+        track_path.addRoundedRect(bar_rect, 2, 2)
+        p.fillPath(track_path, track)
+        seg_w = 96.0
+        seg = QRectF(36 + (368 - seg_w) * self.phase, 212, seg_w, 4)
+        seg_path = QPainterPath()
+        seg_path.addRoundedRect(seg, 2, 2)
+        p.fillPath(seg_path, accent)
+        p.end()
+
+
 def main():
     set_dpi_awareness()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Niumer")
-    # 全局窗口图标：标题栏左上角的 logo。QApplication 级别设置后，
-    # 所有后续创建的对话框/窗口都会自动继承，不用逐个 setWindowIcon。
-    app.setWindowIcon(make_tray_icon())
+    app.setApplicationVersion(VERSION)
     if not acquire_single_instance():
         styled_message(
             None, "Niumer",
             "已经在运行了 —— 看任务栏右下角那条，不用再开一个。",
         )
         return
+    # 先把启动屏摆出来，再加载图标、构建主窗口：双击后马上有反馈
+    splash = StartupSplash()
+    splash.show()
+    app.processEvents()
+    clock = QElapsedTimer()
+    clock.start()
+    # 全局窗口图标：标题栏左上角的 logo。QApplication 级别设置后，
+    # 所有后续创建的对话框/窗口都会自动继承，不用逐个 setWindowIcon。
+    app.setWindowIcon(make_tray_icon())
     bar = SalaryBar(app)  # noqa: F841
+    splash.finish(clock.elapsed())
     sys.exit(app.exec())
 
 
