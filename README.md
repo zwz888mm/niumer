@@ -76,7 +76,9 @@ Windows 任务栏上的一个小工具条，**固定 186 × 32**，贴在右下�
 
 ### 直接用
 
-到 [Releases](../../releases) 下载 `窝囊费.exe`，双击即可。单文件，不用装 Python，也不用装任何运行库。
+到 [Releases](https://github.com/zwz888mm/wonangfei/releases) 下载 `wonangfei.exe`，双击即可。单文件，24 MB，不用装 Python，也不用装任何运行库。
+
+> 首次运行 Windows SmartScreen 可能提示「已保护你的电脑」，点「更多信息」→「仍要运行」即可 —— 程序没做代码签名。
 
 ### 从源码跑
 
