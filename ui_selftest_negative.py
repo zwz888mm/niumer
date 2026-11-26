@@ -78,14 +78,16 @@ bg_mid = main.QColor((c["top"].red() + c["bottom"].red()) // 2,
                      (c["top"].green() + c["bottom"].green()) // 2,
                      (c["top"].blue() + c["bottom"].blue()) // 2)
 good = contrast(c["text"], bg_mid)
-bad = contrast(main.QColor(60, 64, 71), bg_mid)  # 故意贴近背景
+# 故意选一个和背景几乎同色的浅灰，对比度必须掉到 4.5 以下；
+# 原来这里用 (60,64,71) 是深灰，在浅背景上对比度反而很高，对照是失效的。
+bad = contrast(main.QColor(232, 232, 232), bg_mid)
 print(f"[对照] 正常文字对比度 {good:.2f} ≥ 4.5 ? "
       f"{'是' if good >= 4.5 else '否'}；故意压暗后 {bad:.2f} < 4.5 ? "
       f"{'是 → 探测器有效' if bad < 4.5 else '否 → 探测器失灵'}")
 
 # ---- 浅色主题也要能画出来（不落盘，只验证不抛异常） ----
 main.is_light_theme = lambda: True
-for page in (main.PAGE_SALARY, main.PAGE_WORD, main.PAGE_NOVEL):
+for page in (main.PAGE_SALARY, main.PAGE_WORD, main.PAGE_NOVEL, main.PAGE_MUYU):
     img = main.render_bar_image(bar, page)
     assert not img.isNull() and img.width() > 0
 h = main.HelpDialog(bar)
@@ -99,4 +101,4 @@ sc.show_panel("remind")
 sc.show()
 for _ in range(4):
     app.processEvents()
-print("浅色主题渲染正常（三页 + 帮助 + 设置）")
+print("浅色主题渲染正常（四页 + 帮助 + 设置）")

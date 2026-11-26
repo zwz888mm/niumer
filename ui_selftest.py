@@ -1,11 +1,11 @@
-"""界面自检：小条排版越界、对比度、帮助配图、五个设置面板尺寸。
+"""界面自检：小条排版越界、对比度、帮助配图、六个设置面板尺寸。
 
 跑法（在 desktop-tool 目录下）：
     QT_QPA_PLATFORM=windows python ui_selftest.py
 全过退出码 0，有失败退出码 1，可以挂到改完代码后的例行检查里。
 
-检测思路（越界部分）：同一页渲染两遍，一遍正常、一遍关掉右侧页码点，
-两图做像素差就得到页码点的真实范围；去掉点阵那张图里量到的最右
+检测思路（越界部分）：同一页渲染两遍，一遍正常、一遍关掉右侧页码环，
+两图做像素差就得到页码环的真实范围；去掉圆环那张图里量到的最右
 非背景像素就是纯内容的右边界。这样不依赖任何颜色常量，抗锯齿的
 边缘也不会被误判成内容。
 """
@@ -73,7 +73,7 @@ def _pixel_rgb(image, x, y):
 
 
 def rightmost_content(image):
-    """纯内容的右边界（逻辑像素）。页码点必须已被关掉。"""
+    """纯内容的右边界（逻辑像素）。页码环必须已被关掉。"""
     h = image.height()
     top_rgb = c["top"].getRgb()[:3]
     bottom_rgb = c["bottom"].getRgb()[:3]
@@ -95,7 +95,7 @@ def rightmost_content(image):
 
 
 def dot_band(full, bare):
-    """两图差异 = 页码点范围，返回 (左, 右) 逻辑像素。"""
+    """两图差异 = 页码环范围，返回 (左, 右) 逻辑像素。"""
     left, right = None, 0
     for x in range(full.width()):
         for y in range(full.height()):
@@ -118,6 +118,7 @@ cases = [
     ("小说", True, dict(page=main.PAGE_NOVEL)),
     ("天气", True, dict(page=main.PAGE_NOVEL, weather=True,
                         weather_data=main.demo_weather())),
+    ("电子木鱼", True, dict(page=main.PAGE_MUYU)),
 ]
 for label, total, kw in cases:
     bar.show_total = total
@@ -130,20 +131,19 @@ for label, total, kw in cases:
     check(f"{label} 内容不出右边界", edge <= RIGHT_EDGE + 0.5,
           f"最右 {edge:.1f} / 限 {RIGHT_EDGE}")
     if dleft is not None:
-        check(f"{label} 页码点不与内容重叠", dleft >= edge + 2,
+        check(f"{label} 页码环不与内容重叠", dleft >= edge + 2,
               f"点从左 {dleft:.1f}，内容到 {edge:.1f}")
 bar.show_total = True
 
 # 极端数据也不能越界
-_saved_base = bar.earned_base
-bar.earned_base = 9_999_999.99
-bar.elapsed.restart()
+_saved_today = bar.earned_today
+bar.earned_today = lambda: 9_999_999.99
 bar.shown_earned = bar.earned
 bar.shown_rate = 37.5
 img = render(main.PAGE_SALARY, dots=False)
 edge = rightmost_content(img)
 check("大金额内容不出右边界", edge <= RIGHT_EDGE + 0.5, f"最右 {edge:.1f}")
-bar.earned_base = _saved_base
+bar.earned_today = _saved_today
 
 orig_current = bar.deck.current
 bar.deck.current = lambda: ("internationalization", "/ˌɪntəˌnæʃnəlaɪzˈeɪʃn/",
@@ -156,10 +156,38 @@ edge = rightmost_content(img)
 check("超长单词默写不出右边界", edge <= RIGHT_EDGE + 0.5, f"最右 {edge:.1f}")
 bar.deck.current = orig_current
 
+_saved_merit = bar.muyu.total
+_saved_floats = list(bar.muyu.floats)
+bar.muyu.total = 999_999_999
+img = render(main.PAGE_MUYU, dots=False)
+edge = rightmost_content(img)
+check("超大功德数不出右边界", edge <= RIGHT_EDGE + 0.5, f"最右 {edge:.1f}")
+bar.muyu.total = _saved_merit
+
+# 电子木鱼文案池与并发上限
+check("文案池 = 5 句", len(main.MUYU_WORDS) == 5, "、".join(main.MUYU_WORDS))
+check("文案配色数量匹配", len(main.MUYU_COLORS_LIGHT) == len(main.MUYU_WORDS)
+      and len(main.MUYU_COLORS_DARK) == len(main.MUYU_WORDS))
+check("浮字寿命区间 350~600ms", main.MUYU_FLOAT_MIN_MS == 350
+      and main.MUYU_FLOAT_MAX_MS == 600)
+for _ in range(10):
+    bar.muyu.hit()
+check("浮字最多同时 4 条", len(bar.muyu.floats) == main.MUYU_FLOAT_MAX,
+      str(len(bar.muyu.floats)))
+check("浮字全部来自文案池", all(f[0] in main.MUYU_WORDS for f in bar.muyu.floats))
+check("浮字寿命在区间内", all(main.MUYU_FLOAT_MIN_MS / 1000 <= f[3]
+      <= main.MUYU_FLOAT_MAX_MS / 1000 for f in bar.muyu.floats))
+# 带 4 条浮字时也不能越界
+img = render(main.PAGE_MUYU, dots=False)
+edge = rightmost_content(img)
+check("4 条浮字同时出现不出右边界", edge <= RIGHT_EDGE + 0.5, f"最右 {edge:.1f}")
+bar.muyu.floats = _saved_floats
+bar.muyu.total = _saved_merit
+
 # ---- 3. 帮助页：图片齐不齐 ----
 images = main.HelpDialog.build_images(bar)
 pages = main.help_pages()
-check("帮助页数量 = 11", len(pages) == 11, str(len(pages)))
+check("帮助页数量 = 12", len(pages) == 12, str(len(pages)))
 missing = []
 for title, html in pages:
     for name in re.findall(r"preview/([\w-]+)\.png", html):
@@ -171,7 +199,7 @@ for title, html in pages:
         check(f"“{title}”内容过短", False, f"{len(html)} 字符")
 
 # ---- 4. 设置面板不横向溢出 ----
-for key in ("salary", "words", "remind", "novel", "appearance"):
+for key in ("salary", "words", "remind", "novel", "muyu", "appearance"):
     sc = main.SettingsCenter(bar)
     sc.setAttribute(main.Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     sc.show_panel(key)

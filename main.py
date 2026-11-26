@@ -1,4 +1,4 @@
-﻿"""Niumer —— 牛马打工人的桌面助手条。
+"""Niumer —— 牛马打工人的桌面助手条。
 
 窗口固定在任务栏右下角，尺寸恒定 186x32。左键按住水平拖动切换三页：
   1) 工资条：实时累计今日工钱与每秒收入
@@ -7,11 +7,14 @@
      鼠标一离开就换成当地天气（伪装），移回来立刻恢复小说
 Ctrl+Q 或右键菜单隐藏/显示；左键轻点不隐藏窗口。
 """
+import bisect
 import ctypes
 import datetime
 import json
 import math
+import re
 import os
+import random
 import sys
 import threading
 import time
@@ -23,10 +26,10 @@ from ctypes import wintypes
 
 from PyQt6.QtCore import (
     QAbstractNativeEventFilter, QEasingCurve, QElapsedTimer, QObject, QPointF,
-    QRectF, QSettings, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal,
+    QRectF, QSettings, QSize, Qt, QTime, QTimer, QVariantAnimation, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QColor, QCursor, QFont, QFontMetricsF, QIcon, QImage,
+    QBrush, QColor, QCursor, QFont, QFontMetricsF, QIcon, QImage,
     QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygonF,
     QTextBlockFormat, QTextCursor, QTextDocument,
 )
@@ -35,25 +38,45 @@ from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
     QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
-    QSystemTrayIcon, QTextBrowser, QVBoxLayout, QWidget,
+    QSystemTrayIcon, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from niumer_words import CET4_WORDS, CET6_WORDS, KAOYAN_WORDS
+from niumer_novel import BUILTIN_NOVEL_TEXT, BUILTIN_NOVEL_TITLE
 
-WORK_HOURS_PER_DAY = 8
-WORK_DAYS_PER_MONTH = 22
-SECONDS_PER_MONTH = WORK_DAYS_PER_MONTH * WORK_HOURS_PER_DAY * 60 * 60
+DEFAULT_WORK_START = "09:00"
+DEFAULT_WORK_END = "18:00"
+DEFAULT_WORK_DAYS = 22
 
-PAGE_SALARY, PAGE_WORD, PAGE_NOVEL = 0, 1, 2
-PAGE_COUNT = 3
-PAGE_NAMES = ("工资条 · 窝囊费", "单词卡 · 偷偷背", "小说 · 摸鱼读")
-VERSION = "1.0.0"
+PAGE_SALARY, PAGE_WORD, PAGE_NOVEL, PAGE_MUYU = 0, 1, 2, 3
+PAGE_COUNT = 4
+PAGE_NAMES = ("工资条 · 窝囊费", "单词卡 · 偷偷背", "小说 · 摸鱼读", "电子木鱼 · 敲一敲")
+VERSION = "1.1.8"
 AUTHOR = "200Kg"
 CONTACT_EMAIL = "zwz888123@gmail.com"
 VK_SPACE = 0x20
 FEEDBACK_MS = 1400
+
+# 电子木鱼：轻点不敲，按住 250ms 后每 160ms 连击一次
+MUYU_HOLD_MS = 250
+MUYU_REPEAT_MS = 160
+MUYU_HIT_ANIM_MS = 150        # 木鱼左右微震、计数跳动时长
+MUYU_FLOAT_MIN_MS = 350
+MUYU_FLOAT_MAX_MS = 600
+MUYU_FLOAT_MAX = 4            # 最多同时存在的浮动文案数
+
+# 文案池：低饱和柔和色，浅色 / 深色各一套，避免高饱和刺眼
+MUYU_WORDS = ("功德+1", "财富+1", "好运+1", "开心+1", "摸鱼+1")
+MUYU_COLORS_LIGHT = (
+    QColor(38, 122, 86), QColor(150, 106, 30), QColor(38, 96, 158),
+    QColor(150, 72, 104), QColor(104, 84, 158),
+)
+MUYU_COLORS_DARK = (
+    QColor(127, 197, 165), QColor(217, 180, 94), QColor(127, 169, 212),
+    QColor(217, 160, 181), QColor(173, 160, 212),
+)
 
 MOD_CONTROL = 0x0002
 VK_Q = 0x51
@@ -191,8 +214,10 @@ def is_light_theme():
         return True
 
 
-def per_second(monthly: float) -> float:
-    return monthly / SECONDS_PER_MONTH
+def clock_time(text, fallback: str) -> QTime:
+    """把 "09:00" 这类设置解析成 QTime，坏了就退回默认值。"""
+    value = QTime.fromString(str(text or ""), "HH:mm")
+    return value if value.isValid() else QTime.fromString(fallback, "HH:mm")
 
 
 def money(value: float, decimals: int = 2) -> str:
@@ -438,6 +463,15 @@ class WordDeck:
 NOVEL_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "gbk", "big5")
 NOVEL_MAX_BYTES = 8 * 1024 * 1024
 NOVEL_SPEED_MIN, NOVEL_SPEED_MAX = 4, 80
+# 正文字号：小条只有 32px 高，可视区 30px，行高对半分就是 15px，
+# 字号再大就只塞得下一行。所以上限卡在 11px，保证永远能看到完整两行。
+NOVEL_FONT_MIN, NOVEL_FONT_MAX = 8, 11
+NOVEL_FONT_DEFAULT = 9
+# 没识别到章节标题的 txt，按这个字数虚拟分节，方便「上一节/下一节」快速跳
+NOVEL_VIRTUAL_CHARS = 3000
+NOVEL_MAX_CHAPTERS = 2000
+# 内置短篇用这个假路径当书架主键：不用落盘，也不会和用户导入的文件撞名
+BUILTIN_NOVEL_PATH = "builtin://niumer-novel"
 
 # ---------------- 天气：鼠标离开小说页时顶上去的"普通小天气条" ----------------
 WEATHER_CACHE_KEY = "weather_cache"
@@ -458,6 +492,42 @@ WMO_TEXT = {
     85: "阵雪", 86: "阵雪",
     95: "雷阵雨", 96: "雷阵雨", 99: "雷阵雨",
 }
+
+
+class MuyuCounter:
+    """电子木鱼：累计计数本地持久化；浮动文案只在内存里，不保存。"""
+
+    def __init__(self, settings):
+        self.settings = settings
+        try:
+            self.total = max(0, int(self.settings.value("muyu_total", 0) or 0))
+        except (TypeError, ValueError):
+            self.total = 0
+        self.hit_at = 0.0      # 最近一次敲击时刻，驱动微震与计数跳动
+        self.floats = []       # [(文案, 颜色序号, 出生时刻, 寿命秒, x 起点)]
+
+    def hit(self):
+        self.total += 1
+        self.settings.setValue("muyu_total", self.total)
+        now = time.monotonic()
+        self.hit_at = now
+        i = random.randrange(len(MUYU_WORDS))
+        life = random.uniform(MUYU_FLOAT_MIN_MS, MUYU_FLOAT_MAX_MS) / 1000.0
+        self.floats.append((MUYU_WORDS[i], i, now, life))
+        if len(self.floats) > MUYU_FLOAT_MAX:
+            self.floats = self.floats[-MUYU_FLOAT_MAX:]
+
+    def live_floats(self, now=None):
+        """只保留还没飘完的文案；顺手清理过期项。"""
+        now = now if now is not None else time.monotonic()
+        self.floats = [f for f in self.floats if now - f[2] < f[3]]
+        return self.floats
+
+    def reset(self):
+        self.total = 0
+        self.hit_at = 0.0
+        self.floats.clear()
+        self.settings.setValue("muyu_total", 0)
 
 
 def weather_desc(code):
@@ -672,6 +742,47 @@ def read_text_auto(path):
     return raw.decode("utf-8", errors="replace"), "utf-8"
 
 
+def normalize_novel_text(text):
+    """把换行统一成 \\n。QTextDocument 会把 \\r\\n / \\r 折成单个段落分隔，
+    不先规范化的话，Python 里的字符下标和文档内位置会越差越远。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+_CHAPTER_PATTERNS = (
+    # 第一章 / 第 12 回 / 第三卷：标题
+    re.compile(r"^[ \t　]*第[ \t]*[0-9０-９零〇一二三四五六七八九十百千万两]+"
+               r"[ \t]*[章节回卷部篇集](?:[^\n]{0,36})?$"),
+    re.compile(r"^[ \t　]*卷[ \t]*[0-9０-９零〇一二三四五六七八九十百千万两]+"
+               r"(?:[^\n]{0,36})?$"),
+    re.compile(r"^[ \t　]*(?:序章|楔子|引子|前言|序言|尾声|后记|番外|终章|结局)"
+               r"(?:[^\n]{0,36})?$"),
+    re.compile(r"^[ \t　]*chapter[ \t]+[0-9ivxlc]+(?:[^\n]{0,36})?$", re.I),
+)
+# 章节标题不会以这些标点收尾，过滤掉正文里长得像标题的句子
+_CHAPTER_TAIL = set("。，！？；：,.!?;:、…～~\"“”‘’」』》〉）)]}")
+
+
+def parse_chapters(text):
+    """从全文里挑出章节标题行，返回 [(字符位置, 标题)]。
+
+    只认独立成行、长度 ≤ 40 的明确标题格式；重复标题（常见于前面的目录页）
+    保留最后一次出现的位置，也就是正文里那一处。识别不到就返回空列表，
+    由 NovelView 按固定字数虚拟分节。
+    """
+    text = normalize_novel_text(text)
+    pos = 0
+    last_of = {}
+    for line in text.splitlines(keepends=True):
+        raw_line = line.rstrip("\n")
+        s = raw_line.strip()
+        if s and len(s) <= 40 and s[-1] not in _CHAPTER_TAIL \
+                and any(pat.match(raw_line) for pat in _CHAPTER_PATTERNS):
+            last_of[s] = pos
+        pos += len(line)
+    out = sorted((p, t) for t, p in last_of.items())
+    return out[:NOVEL_MAX_CHAPTERS]
+
+
 class NovelShelf:
     """小说书架：书单 + 每本书的阅读位置（字符偏移），以 JSON 存进 QSettings。"""
 
@@ -693,34 +804,139 @@ class NovelShelf:
                     p = str(it.get("path", ""))
                     if not p:
                         continue
+                    chapters = []
+                    for ch in (it.get("chapters") or []):
+                        try:
+                            chapters.append([int(ch[0]), str(ch[1])])
+                        except (TypeError, ValueError, IndexError):
+                            continue
                     self.books.append({
                         "path": p,
                         "title": str(it.get("title") or os.path.basename(p)),
                         "pos": int(it.get("pos", 0) or 0),
                         "total": int(it.get("total", 0) or 0),
+                        "chapters": chapters,
+                        "virtual": int(it.get("virtual", 0) or 0),
+                        "last": int(it.get("last", 0) or 0),
                     })
         self.current = str(settings.value("novel_current", ""))
+        self._ensure_builtin()
+
+    def _ensure_builtin(self):
+        """书架里始终留一本内置短篇：装好就有得读，不用先去找 txt。"""
+        text = normalize_novel_text(BUILTIN_NOVEL_TEXT)
+        old = self.get(BUILTIN_NOVEL_PATH)
+        if old:
+            # 从旧版本升级上来的条目没有章节表，文本在内存里，顺手补齐
+            if not old.get("chapters") and not old.get("virtual"):
+                old["chapters"] = [[p, t] for p, t in parse_chapters(text)]
+                old["total"] = len(text)
+                self.save()
+            return
+        self.books.append({
+            "path": BUILTIN_NOVEL_PATH,
+            "title": BUILTIN_NOVEL_TITLE,
+            "pos": 0,
+            "total": len(text),
+            "chapters": [[p, t] for p, t in parse_chapters(text)],
+            "virtual": 0,
+            "last": 0,
+        })
+        self.save()
 
     def save(self):
         self.settings.setValue("novel_shelf", json.dumps(self.books, ensure_ascii=False))
         self.settings.setValue("novel_current", self.current)
 
-    def add(self, path, text, total):
-        """加入书架（同名路径则更新），返回书对象。"""
+    def add(self, path, text, total=None):
+        """加入书架（同名路径则更新），顺手把章节目录解析好存下来。"""
         title = os.path.splitext(os.path.basename(path))[0] or path
+        norm = normalize_novel_text(text)
+        chapters = parse_chapters(norm)
+        total = len(norm) if total is None else int(total)
+        virtual = 0 if chapters else 1
         for b in self.books:
             if b["path"] == path:
                 b["title"] = title
                 b["total"] = total
+                b["chapters"] = [[p, t] for p, t in chapters]
+                b["virtual"] = virtual
+                b["last"] = int(time.time())
                 self.current = path
                 self.save()
                 return b
-        book = {"path": path, "title": title, "pos": 0, "total": total}
+        book = {
+            "path": path, "title": title, "pos": 0, "total": total,
+            "chapters": [[p, t] for p, t in chapters],
+            "virtual": virtual, "last": int(time.time()),
+        }
         self.books.insert(0, book)
         del self.books[self.MAX_BOOKS:]
         self.current = path
         self.save()
         return book
+
+    def ensure_chapters(self, book, text):
+        """老版本书架里没有章节表，正文载入内存后补解析一次即可。"""
+        if not book or book.get("chapters") or book.get("virtual"):
+            return
+        norm = normalize_novel_text(text)
+        ch = parse_chapters(norm)
+        book["chapters"] = [[p, t] for p, t in ch]
+        book["total"] = len(norm)
+        book["virtual"] = 0 if ch else 1
+        self.save()
+
+    def ensure_chapters_file(self, book):
+        """旧书架条目没章节表时读一次文件补上；补过或确认无标题后不再重复读。"""
+        if not book or book.get("chapters") or book.get("virtual"):
+            return
+        if book["path"] == BUILTIN_NOVEL_PATH:
+            self.ensure_chapters(book, BUILTIN_NOVEL_TEXT)
+            return
+        try:
+            if os.path.getsize(book["path"]) > NOVEL_MAX_BYTES:
+                book["virtual"] = 1
+                self.save()
+                return
+            text, _ = read_text_auto(book["path"])
+        except OSError:
+            book["virtual"] = 1
+            self.save()
+            return
+        self.ensure_chapters(book, text)
+
+    def chapters_for(self, path):
+        """章节列表 [(字符位置, 标题)]；没有真实标题时按字数虚拟分节。"""
+        b = self.get(path)
+        if not b:
+            return []
+        self.ensure_chapters_file(b)
+        ch = [[int(p), str(t)] for p, t in (b.get("chapters") or [])]
+        if ch:
+            return ch[:NOVEL_MAX_CHAPTERS]
+        total = max(1, int(b.get("total") or 0))
+        return [
+            [p, f"第 {i} 段"]
+            for i, p in enumerate(range(0, total, NOVEL_VIRTUAL_CHARS), 1)
+        ][:NOVEL_MAX_CHAPTERS]
+
+    def chapter_count(self, path):
+        return len(self.chapters_for(path))
+
+    def step_book(self, delta):
+        """按书架顺序取上一本 / 下一本的路径（循环）。"""
+        if not self.books:
+            return None
+        cur = self.current_book()
+        idx = self.books.index(cur) if cur in self.books else 0
+        return self.books[(idx + int(delta)) % len(self.books)]["path"]
+
+    def touch(self, path):
+        b = self.get(path)
+        if b:
+            b["last"] = int(time.time())
+            self.save()
 
     def remove(self, path):
         self.books = [b for b in self.books if b["path"] != path]
@@ -746,7 +962,7 @@ class NovelShelf:
     def set_current(self, path):
         if self.get(path):
             self.current = path
-            self.save()
+            self.touch(path)
 
     def set_pos(self, path, pos, total=None):
         b = self.get(path)
@@ -827,6 +1043,12 @@ def dialog_style():
             border:2px solid {p['accent']}; padding:4px 9px; }}
         QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{ border:none; background:transparent; padding:0; }}
         QComboBox::drop-down {{ border:none; width:20px; }}
+        /* 时间选择：时和分装进同一个圆角框，看起来是一个控件而不是两个方框 */
+        QFrame#TimeField {{ background:{p['card']}; border:1px solid {p['border']}; border-radius:4px; }}
+        QFrame#TimeField:hover {{ border-color:{p['accent']}; }}
+        QFrame#TimeField QComboBox {{ border:none; background:transparent; padding:0 2px; }}
+        QFrame#TimeField QComboBox:focus {{ border:none; padding:0 2px; }}
+        QFrame#TimeField QComboBox::drop-down {{ width:12px; }}
 
         /* ===== 下拉弹框（这个极易漏！没覆盖的话深色主题下拉是白底黑字）===== */
         QComboBox QAbstractItemView, QAbstractItemView {{
@@ -1101,6 +1323,78 @@ class FlatDoubleSpin(_FlatStepper, QDoubleSpinBox):
         self._init_stepper()
 
 
+class DropCombo(QComboBox):
+    """右侧自己画小三角的下拉框。
+
+    QSS 把原生下拉按钮的边框去掉后箭头也跟着没了，光看一个方框想不到能点；
+    这里在右边补一个三角，深浅色都跟着主题走。
+    """
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        pal = ui_palette()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx = self.width() - 6.0
+        cy = self.height() / 2.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(pal["sub"]))
+        painter.drawPolygon(QPolygonF([
+            QPointF(cx - 3.6, cy - 1.8), QPointF(cx + 3.6, cy - 1.8),
+            QPointF(cx, cy + 2.6),
+        ]))
+        painter.end()
+
+
+class TimeField(QFrame):
+    """时间输入：一个圆角框里放「时:分」两个下拉，看起来像个整体控件。
+
+    比一个框里塞可打字的 QTimeEdit 稳：只能从 00-23 / 00-59 里选，
+    选不出 25:70 这种非法值，也不会因为输入法/光标搞出一堆怪状态。
+    """
+
+    changed = pyqtSignal()
+
+    def __init__(self, value: QTime, parent=None):
+        super().__init__(parent)
+        self.setObjectName("TimeField")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(5, 2, 5, 2)
+        lay.setSpacing(2)
+
+        self.hour = DropCombo()
+        self.minute = DropCombo()
+        clock_font = QFont("Consolas")
+        clock_font.setPixelSize(14)
+        for box, count in ((self.hour, 24), (self.minute, 60)):
+            for i in range(count):
+                box.addItem(f"{i:02d}", i)
+            box.setFont(clock_font)
+            box.setFixedWidth(40)
+            box.setMinimumHeight(30)
+            box.setCursor(Qt.CursorShape.PointingHandCursor)
+            box.setMaxVisibleItems(10)
+            box.currentIndexChanged.connect(lambda _: self.changed.emit())
+        self.hour.setCurrentIndex(value.hour())
+        self.minute.setCurrentIndex(value.minute())
+
+        colon = QLabel(":")
+        colon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        colon.setFixedWidth(8)
+        colon.setFont(clock_font)
+
+        lay.addWidget(self.hour)
+        lay.addWidget(colon)
+        lay.addWidget(self.minute)
+
+    def time(self) -> QTime:
+        return QTime(self.hour.currentData(), self.minute.currentData())
+
+    def set_time(self, value: QTime):
+        self.hour.setCurrentIndex(value.hour())
+        self.minute.setCurrentIndex(value.minute())
+
+
 class RatioBar(QWidget):
     """细进度条。
 
@@ -1257,7 +1551,7 @@ class AppearancePanel(_BasePanel):
 
 
 class SalaryPanel(_BasePanel):
-    """工资面板：月薪、快捷预设、计时操作。"""
+    """工资面板：月薪、上下班时间、每月工作日、快捷预设、计时操作。"""
 
     def __init__(self, bar):
         super().__init__(bar)
@@ -1308,9 +1602,38 @@ class SalaryPanel(_BasePanel):
         cl.addRow("快捷预设：", presets)
         root.addWidget(card)
 
-        info = QLabel(f"计算口径：月薪 ÷ {WORK_DAYS_PER_MONTH}天 × {WORK_HOURS_PER_DAY}小时 × 3600秒")
-        info.setObjectName("Hint")
-        root.addWidget(info)
+        # 时间口径：上下班时间 + 每月工作日，工资按今天已过去的上班时间折算
+        work = QFrame()
+        work.setObjectName("Card")
+        wl = QHBoxLayout(work)
+        wl.setContentsMargins(16, 10, 16, 10)
+        wl.setSpacing(6)
+        self.start_field = TimeField(bar.work_start)
+        self.end_field = TimeField(bar.work_end)
+        self.days_spin = FlatSpin()
+        self.days_spin.setRange(1, 31)
+        self.days_spin.setValue(bar.work_days)
+        self.days_spin.setFixedWidth(78)
+        self.days_spin.setMinimumHeight(34)
+        self.days_spin.valueChanged.connect(self.update_preview)
+        self.start_field.changed.connect(self.update_preview)
+        self.end_field.changed.connect(self.update_preview)
+        wl.addWidget(QLabel("上班"))
+        wl.addWidget(self.start_field)
+        wl.addSpacing(10)
+        wl.addWidget(QLabel("下班"))
+        wl.addWidget(self.end_field)
+        wl.addSpacing(12)
+        wl.addWidget(QLabel("每月工作日"))
+        wl.addWidget(self.days_spin)
+        wl.addWidget(QLabel("天"))
+        wl.addStretch(1)
+        root.addWidget(work)
+
+        self.warn = QLabel()
+        self.warn.setStyleSheet("color:#d13438; font-size:12px;")
+        self.warn.hide()
+        root.addWidget(self.warn)
 
         ops = QFrame()
         ops.setObjectName("Card")
@@ -1333,13 +1656,35 @@ class SalaryPanel(_BasePanel):
         self.refresh_ops()
         self.update_preview()
 
+    def start_time(self) -> QTime:
+        return self.start_field.time()
+
+    def end_time(self) -> QTime:
+        return self.end_field.time()
+
     def update_preview(self):
-        rate = per_second(self.spin.value())
+        day_seconds = self.day_seconds()
+        if day_seconds <= 0:
+            self.preview.setText("¥0.0000")
+            self.detail.setText("下班时间要晚于上班时间")
+            self.warn.setText("下班时间必须晚于上班时间，调整后才能保存。")
+            self.warn.show()
+            return
+        self.warn.hide()
+        rate = self.preview_rate()
         self.preview.setText(f"¥{rate:.4f}")
+        hours = f"{day_seconds / 3600:g}"
         self.detail.setText(
-            f"按 {WORK_DAYS_PER_MONTH}天 × {WORK_HOURS_PER_DAY}小时算 · "
-            f"一天约 ¥{rate * WORK_HOURS_PER_DAY * 3600:,.0f}"
+            f"按 {self.days_spin.value()}天 × {hours}小时算 · "
+            f"一天约 ¥{rate * day_seconds:,.0f}"
         )
+
+    def day_seconds(self) -> int:
+        return max(0, self.start_time().secsTo(self.end_time()))
+
+    def preview_rate(self) -> float:
+        month_seconds = self.day_seconds() * self.days_spin.value()
+        return self.spin.value() / month_seconds if month_seconds else 0.0
 
     def refresh_ops(self):
         self.pause_btn.setText("继续计时" if self.bar.paused else "暂停计时")
@@ -1355,15 +1700,35 @@ class SalaryPanel(_BasePanel):
 
     def apply(self):
         bar = self.bar
-        new = self.spin.value()
-        if abs(new - bar.monthly) > 1e-9:
-            bar.earned_base = bar.earned
-            bar.elapsed.restart()
-            bar.monthly = new
-            bar.settings.setValue("monthly_salary", new)
-            bar.shown_earned = bar.earned
-            bar.shown_rate = bar.rate
-            bar.update_tip()
+        monthly = self.spin.value()
+        start = self.start_time()
+        end = self.end_time()
+        days = self.days_spin.value()
+        if start.secsTo(end) <= 0:
+            # 下班早于上班，折算不出工时：挡住保存，把原因标出来
+            self.update_preview()
+            return False
+        changed = (
+            abs(monthly - bar.monthly) > 1e-9
+            or start != bar.work_start
+            or end != bar.work_end
+            or days != bar.work_days
+        )
+        if not changed:
+            return True
+        bar.monthly = monthly
+        bar.work_start = start
+        bar.work_end = end
+        bar.work_days = days
+        bar.settings.setValue("monthly_salary", monthly)
+        bar.settings.setValue("work_start", start.toString("HH:mm"))
+        bar.settings.setValue("work_end", end.toString("HH:mm"))
+        bar.settings.setValue("work_days", days)
+        bar.reset_day = None   # 口径变了，之前的清零基准作废
+        bar.shown_earned = bar.earned
+        bar.shown_rate = bar.rate
+        bar.update_tip()
+        return True
 
 
 class WordsPanel(_BasePanel):
@@ -1671,29 +2036,54 @@ class NovelView:
         self.offset = 0.0
         self.view_w = 150.0
         self.view_h = 28.0
-        self.font_size = int(settings.value("novel_font", 11))
+        # 老版本存过 16px 这种大字号，那种值只能显示一行，直接回落到舒适的默认值；
+        # 回落完顺手写回设置，下次打开就一致了
+        stored_font = int(settings.value("novel_font", NOVEL_FONT_DEFAULT))
+        if stored_font < NOVEL_FONT_MIN or stored_font > NOVEL_FONT_MAX:
+            stored_font = NOVEL_FONT_DEFAULT
+            settings.setValue("novel_font", stored_font)
+        self.font_size = stored_font
         self.speed = float(settings.value("novel_speed", 14))
+        self.chapters = []      # [(文档内字符位置, 标题)]，已按位置排好
+        self.chapter_ys = None  # 对应的排版 Y 坐标，排版变化时置空重算
 
     # ---- 排版 ----
+    def line_height(self):
+        """两行正好铺满可视区：每行高度取可视高度的一半。"""
+        return max(11.0, self.view_h / 2.0)
+
+    def render_font_size(self):
+        """实际下笔的字号：不超过行高的八成，字才不会被行框裁掉。"""
+        line_h = self.line_height()
+        return max(NOVEL_FONT_MIN, min(int(self.font_size), int(line_h * 0.78)))
+
     def set_viewport(self, width, height):
-        """正文区域尺寸变化时重排（只为宽度重排，高度只影响可视行数）。"""
+        """正文区域尺寸变化时重排；行高依赖可视高度，所以高度变了也要重排。"""
         width = max(40.0, float(width))
-        self.view_h = max(12.0, float(height))
+        height = max(12.0, float(height))
+        if abs(width - self.view_w) <= 0.5 and abs(height - self.view_h) <= 0.5:
+            return
+        pos = self.char_pos() if self.book else 0
+        self.view_h = height
         if abs(width - self.view_w) > 0.5:
-            pos = self.char_pos() if self.book else 0
             self.view_w = width
             self.doc.setTextWidth(width)
-            if self.book:
-                self.offset = min(self._y_for_pos(pos), self.max_offset())
+        self.chapter_ys = None
+        if self.book:
+            self.apply_font()
+            self.offset = min(self._y_for_pos(pos), self.max_offset())
 
     def apply_font(self):
+        size = self.render_font_size()
+        line_h = self.line_height()
         font = QFont("Microsoft YaHei")
-        font.setPixelSize(max(9, int(self.font_size)))
+        font.setPixelSize(size)
         self.doc.setDefaultFont(font)
         cursor = QTextCursor(self.doc)
         cursor.select(QTextCursor.SelectionType.Document)
         fmt = QTextBlockFormat()
-        fmt.setLineHeight(100.0, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+        # 行高锁成固定像素：两行合计正好等于可视高度，不会因为字体行距多出一截
+        fmt.setLineHeight(line_h, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
         fmt.setTopMargin(0)
         fmt.setBottomMargin(0)
         fmt.setLeftMargin(0)
@@ -1702,23 +2092,70 @@ class NovelView:
         cursor.clearSelection()
 
     def load(self, book, text=None):
-        if not os.path.exists(book["path"]):
+        builtin = book["path"] == BUILTIN_NOVEL_PATH
+        if not builtin and not os.path.exists(book["path"]):
             return False
         try:
-            if text is None:
+            if builtin:
+                text = BUILTIN_NOVEL_TEXT
+            elif text is None:
                 text, _ = read_text_auto(book["path"])
         except OSError:
             return False
+        text = normalize_novel_text(text)
         self.book = book
         self.doc.setPlainText(text)
         self.doc.setTextWidth(self.view_w)
         self.apply_font()
+        # 老版本书架没有章节表，正文已在内存里，顺手补一次
+        self.shelf.ensure_chapters(book, text)
+        # 以文档实际字数为准，进度百分比才和书架里的数字对得上
+        book["total"] = self.doc.characterCount() - 1
+        self.shelf.set_pos(book["path"], int(book.get("pos", 0) or 0), book["total"])
+        self._build_chapters(book)
         self.offset = min(self._y_for_pos(int(book.get("pos", 0) or 0)), self.max_offset())
         return True
+
+    def _build_chapters(self, book):
+        """把书架里存的章节位置换算成文档内坐标。
+
+        虚拟分节的位置本来就是按字符数切的，直接用；真实标题则用 doc.find
+        从提示位置往后精确找一遍，避开换行规范化带来的下标漂移。
+        """
+        self.chapter_ys = None
+        raw = self.shelf.chapters_for(book["path"])
+        if not raw:
+            self.chapters = []
+            return
+        if book.get("virtual"):
+            last = max(1, self.doc.characterCount() - 1)
+            self.chapters = [(min(int(p), last), str(t)) for p, t in raw]
+            return
+        out = []
+        last = max(1, self.doc.characterCount() - 1)
+        for p, title in raw:
+            hint = max(0, min(int(p), last))
+            start = QTextCursor(self.doc)
+            start.setPosition(hint)
+            found = self.doc.find(title, start)
+            if found.isNull():
+                found = self.doc.find(title, QTextCursor(self.doc))
+            out.append((found.selectionStart() if not found.isNull() else hint,
+                        str(title)))
+        out.sort(key=lambda x: x[0])
+        dedup = []
+        for pos, title in out:
+            if dedup and pos <= dedup[-1][0]:
+                continue
+            dedup.append((pos, title))
+        self.chapters = dedup
+        self.chapter_ys = None
 
     def unload(self):
         self.book = None
         self.offset = 0.0
+        self.chapters = []
+        self.chapter_ys = None
         self.doc.clear()
 
     # ---- 位置换算 ----
@@ -1769,6 +2206,73 @@ class NovelView:
     def scroll_by(self, dy):
         self.offset = max(0.0, min(self.max_offset(), self.offset + dy))
 
+    # ---- 跳转：章节 / 百分比 / 头尾 / 翻页 ----
+    def chapter_list(self):
+        return list(self.chapters)
+
+    def _chapter_y_list(self):
+        """章节起始的排版 Y 坐标。用 Y 比而不用字符位置，跳转和判定才是同一把尺子：
+        字号、宽度一变字符位置不变，但屏幕上的行会重排。"""
+        if self.chapter_ys is None:
+            self.chapter_ys = [self._y_for_pos(p) for p, _ in self.chapters]
+        return self.chapter_ys
+
+    def chapter_index(self):
+        """当前读到第几节（0 起）。"""
+        if not self.chapters:
+            return -1
+        ys = self._chapter_y_list()
+        idx = bisect.bisect_right(ys, self.offset + 0.5) - 1
+        return max(0, idx)
+
+    def chapter_label(self):
+        if not self.chapters:
+            return ""
+        return self.chapters[self.chapter_index()][1]
+
+    def goto_pos(self, pos, save=True):
+        if not self.book:
+            return
+        self.offset = min(self._y_for_pos(pos), self.max_offset())
+        if save:
+            self.save()
+
+    def goto_percent(self, pct, save=True):
+        if not self.book:
+            return
+        total = max(1, self.doc.characterCount() - 1)
+        self.goto_pos(int(total * max(0.0, min(100.0, float(pct))) / 100.0),
+                      save=save)
+
+    def goto_chapter(self, index):
+        if not self.book or not self.chapters:
+            return False
+        i = max(0, min(len(self.chapters) - 1, int(index)))
+        self.goto_pos(self.chapters[i][0])
+        return True
+
+    def step_chapter(self, delta):
+        if not self.chapters:
+            return False
+        cur = self.chapter_index()
+        nxt = cur + int(delta)
+        if nxt < 0:
+            self.goto_pos(0)
+            return True
+        return self.goto_chapter(nxt)
+
+    def goto_start(self):
+        self.goto_pos(0)
+
+    def goto_end(self):
+        self.goto_pos(max(0, self.doc.characterCount() - 1))
+
+    def page_scroll(self, sign):
+        if not self.book:
+            return
+        self.scroll_by(int(sign) * max(8.0, self.view_h - 6.0))
+        self.save()
+
     def save(self):
         if not self.book:
             return
@@ -1777,7 +2281,7 @@ class NovelView:
         self.shelf.set_pos(self.book["path"], pos, self.doc.characterCount() - 1)
 
     def set_font_size(self, size):
-        size = max(9, min(20, int(size)))
+        size = max(NOVEL_FONT_MIN, min(NOVEL_FONT_MAX, int(size)))
         if size == self.font_size:
             return
         pos = self.char_pos() if self.book else 0
@@ -1785,6 +2289,7 @@ class NovelView:
         self.settings.setValue("novel_font", size)
         if self.book:
             self.apply_font()
+            self.chapter_ys = None
             self.offset = min(self._y_for_pos(pos), self.max_offset())
 
     # ---- 绘制 ----
@@ -1803,62 +2308,186 @@ class NovelView:
         painter.restore()
 
 class NovelPanel(_BasePanel):
-    """摸鱼阅读面板：导入 txt、书架管理、字号与滚动速度。"""
+    """摸鱼阅读：书架 / 章节目录 / 跳转进度 / 手感，四页收在一个面板里。
+
+    阅读页面（小条上的绘制）一行不动，这里只补使用上的便利。
+    """
+
+    TAB_SHELF, TAB_CHAPTER, TAB_SEEK, TAB_FEEL = 0, 1, 2, 3
 
     def __init__(self, bar):
         super().__init__(bar)
         self.shelf = bar.shelf
+        self._syncing = False
+        self._chapter_path = ""
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
-        head = QLabel("导入 txt 小说，文字直接在任务栏小条里滚动，鼠标移开就停")
+        head = QLabel("小说在小条里滚动；这里管书架、章节、进度和手感，改完立即生效")
         head.setObjectName("Title")
         head.setWordWrap(True)
         root.addWidget(head)
 
+        self.tabs = QTabWidget()
+        p = ui_palette()
+        self.tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border:1px solid {p['border']}; border-radius:8px;"
+            f" background:{p['card']}; }}"
+            f" QTabBar::tab {{ background:transparent; color:{p['sub']};"
+            f" padding:7px 16px; }}"
+            f" QTabBar::tab:selected {{ color:{p['accent']};"
+            f" border-bottom:2px solid {p['accent']}; }}"
+        )
+        root.addWidget(self.tabs)
+        self.tabs.addTab(self._build_shelf_tab(), "书架")
+        self.tabs.addTab(self._build_chapter_tab(), "章节目录")
+        self.tabs.addTab(self._build_seek_tab(), "跳转进度")
+        self.tabs.addTab(self._build_feel_tab(), "手感与伪装")
+
+        self.bar.weather.ready.connect(self.on_weather_signal)
+        self.bar.weather.failed.connect(self.on_weather_signal)
+        self._seek_timer = QTimer(self)
+        self._seek_timer.setSingleShot(True)
+        self._seek_timer.timeout.connect(self.commit_seek)
+
+        self.refresh_weather_state()
+        self.refresh_list()
+        self.refresh_chapters()
+        self.refresh_seek()
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
+    def _buttons(self, *specs):
+        """一行按钮：[(文字, 回调, 是否主按钮)]。"""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for text, slot, primary in specs:
+            btn = QPushButton(text)
+            if primary:
+                btn.setObjectName("Primary")
+            btn.setMinimumHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(slot)
+            row.addWidget(btn)
+        row.addStretch(1)
+        return row
+
+    @staticmethod
+    def _hint(text):
+        lab = QLabel(text)
+        lab.setObjectName("Hint")
+        lab.setWordWrap(True)
+        return lab
+
+    def _build_shelf_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(9)
         card = QFrame()
         card.setObjectName("Card")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(14, 12, 14, 12)
-        cl.setSpacing(10)
-
+        cl.setContentsMargins(10, 8, 10, 8)
+        cl.setSpacing(8)
         self.list = QListWidget()
-        self.list.setMinimumHeight(190)
+        self.list.setMinimumHeight(168)
         self.list.setItemDelegate(_BookDelegate(self.list))
         self.list.itemDoubleClicked.connect(lambda *_: self.read_selected())
+        self.list.currentItemChanged.connect(lambda *_: self.on_book_selection())
         cl.addWidget(self.list)
+        lay.addWidget(card)
+        lay.addLayout(self._buttons(
+            ("导入 txt", self.import_txt, True),
+            ("读这本", self.read_selected, False),
+            ("移出书架", self.remove_selected, False),
+            ("打开所在目录", self.open_dir_selected, False),
+        ))
+        lay.addLayout(self._buttons(
+            ("← 上一本", lambda: self.step_book(-1), False),
+            ("下一本 →", lambda: self.step_book(1), False),
+            ("从头读", self.reset_selected, False),
+        ))
+        lay.addWidget(self._hint(
+            "双击书名或点「读这本」开始看；每本书的进度、章节各自保存，切书不会串。"
+        ))
+        lay.addStretch(1)
+        return page
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        import_btn = QPushButton("导入 txt")
-        import_btn.setObjectName("Primary")
-        read_btn = QPushButton("读这本")
-        del_btn = QPushButton("移出书架")
-        reset_btn = QPushButton("从头读")
-        for btn in (import_btn, read_btn, del_btn, reset_btn):
-            btn.setMinimumHeight(32)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_btn.clicked.connect(self.import_txt)
-        read_btn.clicked.connect(self.read_selected)
-        del_btn.clicked.connect(self.remove_selected)
-        reset_btn.clicked.connect(self.reset_selected)
-        row.addWidget(import_btn)
-        row.addWidget(read_btn)
-        row.addWidget(del_btn)
-        row.addWidget(reset_btn)
-        row.addStretch(1)
-        cl.addLayout(row)
-        root.addWidget(card)
+    def _build_chapter_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(9)
+        self.chapter_search = QLineEdit()
+        self.chapter_search.setPlaceholderText("输入标题关键字过滤")
+        self.chapter_search.setMinimumHeight(30)
+        self.chapter_search.textChanged.connect(self.filter_chapters)
+        lay.addWidget(self.chapter_search)
+        self.chapter_list = QListWidget()
+        self.chapter_list.setMinimumHeight(158)
+        self.chapter_list.setMaximumHeight(196)
+        self.chapter_list.itemDoubleClicked.connect(
+            lambda *_: self.goto_chapter_selected()
+        )
+        lay.addWidget(self.chapter_list)
+        lay.addLayout(self._buttons(
+            ("← 上一节", lambda: self.step_chapter(-1), False),
+            ("下一节 →", lambda: self.step_chapter(1), False),
+            ("跳到选中节", self.goto_chapter_selected, True),
+        ))
+        self.chapter_hint = self._hint("")
+        lay.addWidget(self.chapter_hint)
+        lay.addStretch(1)
+        return page
 
+    def _build_seek_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(14, 14, 14, 12)
+        lay.setSpacing(12)
+        self.seek_label = QLabel("—")
+        self.seek_label.setObjectName("Title")
+        self.seek_label.setWordWrap(True)
+        lay.addWidget(self.seek_label)
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setRange(0, 1000)
+        self.seek_slider.setSingleStep(10)
+        self.seek_slider.setPageStep(50)
+        self.seek_slider.setMinimumHeight(26)
+        self.seek_slider.valueChanged.connect(self.on_seek_value)
+        self.seek_slider.sliderReleased.connect(self.commit_seek)
+        lay.addWidget(self.seek_slider)
+        ticks = QHBoxLayout()
+        for t in ("0%", "25%", "50%", "75%", "100%"):
+            ticks.addWidget(QLabel(t))
+            if t != "100%":
+                ticks.addStretch(1)
+        lay.addLayout(ticks)
+        lay.addLayout(self._buttons(
+            ("回到开头", lambda: self.quick_seek(0), False),
+            ("−10%", lambda: self.quick_seek(-10, True), False),
+            ("+10%", lambda: self.quick_seek(10, True), False),
+            ("跳到末尾", lambda: self.quick_seek(100), False),
+        ))
+        lay.addWidget(self._hint(
+            "拖动滑块立即跳，松手保存。小条上也能用：轻点取焦点后 "
+            "Home / End 到头尾，PgUp / PgDn 翻页，[ ] 上下节，空格暂停。"
+        ))
+        lay.addStretch(1)
+        return page
+
+    def _build_feel_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(10)
         feel = QGroupBox("阅读手感")
-        feel.setMinimumHeight(118)
         form = QFormLayout(feel)
         form.setSpacing(8)
         self.font_spin = FlatSpin()
-        self.font_spin.setRange(10, 20)
+        self.font_spin.setRange(NOVEL_FONT_MIN, NOVEL_FONT_MAX)
         self.font_spin.setSuffix(" px")
-        self.font_spin.setValue(int(self.bar.settings.value("novel_font", 11)))
+        self.font_spin.setValue(int(self.bar.novel.font_size))
         self.speed_spin = FlatSpin()
         self.speed_spin.setRange(NOVEL_SPEED_MIN, NOVEL_SPEED_MAX)
         self.speed_spin.setSingleStep(2)
@@ -1866,24 +2495,19 @@ class NovelPanel(_BasePanel):
         self.speed_spin.setValue(int(float(self.bar.settings.value("novel_speed", 14))))
         for sp in (self.font_spin, self.speed_spin):
             sp.setMinimumHeight(30)
-            sp.setMaximumWidth(150)  # 一行放个小数字就够，别铺满整张卡
+            sp.setMaximumWidth(150)
         self.font_spin.valueChanged.connect(self.on_font_changed)
         self.speed_spin.valueChanged.connect(self.on_speed_changed)
         form.addRow("正文字号：", self.font_spin)
         form.addRow("滚动速度：", self.speed_spin)
-        root.addWidget(feel)
-
-        note = QLabel(
-            "小条里一次显示两行左右，鼠标停在条上才开始爬，移开立刻停。"
+        lay.addWidget(feel)
+        lay.addWidget(self._hint(
+            "小条高度固定，字号 8～11px 都能完整显示两行，再大就只剩一行了，"
+            "所以上限卡在 11。鼠标停在条上才开始爬，移开立刻停。"
             "阅读位置按字序记录，重启接着读。"
-        )
-        note.setObjectName("Hint")
-        note.setWordWrap(True)
-        root.addWidget(note)
+        ))
 
-        # 伪装：鼠标离开时这一页显示天气
         mask = QGroupBox("鼠标移开时（伪装成天气）")
-        mask.setMinimumHeight(132)
         mv = QVBoxLayout(mask)
         mv.setContentsMargins(14, 18, 14, 12)
         mv.setSpacing(8)
@@ -1908,14 +2532,9 @@ class NovelPanel(_BasePanel):
         self.weather_state.setObjectName("Hint")
         self.weather_state.setWordWrap(True)
         mv.addWidget(self.weather_state)
-        root.addWidget(mask)
-        root.addStretch(1)
-
-        self.bar.weather.ready.connect(self.on_weather_signal)
-        self.bar.weather.failed.connect(self.on_weather_signal)
-        self.refresh_weather_state()
-
-        self.refresh_list()
+        lay.addWidget(mask)
+        lay.addStretch(1)
+        return page
 
     def on_weather_toggle(self, on):
         self.bar.weather_on = bool(on)
@@ -1960,6 +2579,7 @@ class NovelPanel(_BasePanel):
             self.weather_state.setText("还没取过天气，切到小说页会自动请求")
 
     def refresh_list(self):
+        self.list.blockSignals(True)
         self.list.clear()
         current = self.shelf.current
         if not self.shelf.books:
@@ -1968,18 +2588,31 @@ class NovelPanel(_BasePanel):
             empty.setForeground(QColor(ui_palette()["faint"]))
             empty.setSizeHint(QSize(0, 34))
             self.list.addItem(empty)
-            return
-        for b in self.shelf.books:
-            is_current = b["path"] == current
-            item = QListWidgetItem(f"《{b['title']}》")
-            item.setData(Qt.ItemDataRole.UserRole, b["path"])
-            item.setData(_BookDelegate.PCT_ROLE, f"{NovelShelf.percent(b):.1f}%")
-            item.setData(_BookDelegate.CURRENT_ROLE, is_current)
-            item.setToolTip(b["path"])
-            item.setSizeHint(QSize(0, 30))
-            self.list.addItem(item)
-        if self.list.count() and not self.shelf.current:
-            self.list.setCurrentRow(0)
+        else:
+            for b in self.shelf.books:
+                is_current = b["path"] == current
+                item = QListWidgetItem(f"《{b['title']}》")
+                item.setData(Qt.ItemDataRole.UserRole, b["path"])
+                item.setData(_BookDelegate.PCT_ROLE, f"{NovelShelf.percent(b):.1f}%")
+                item.setData(_BookDelegate.CURRENT_ROLE, is_current)
+                n = len(b.get("chapters") or [])
+                info = f"{int(b.get('total') or 0):,} 字"
+                info += f" · {n} 节" if n else " · 自动分节"
+                if b.get("last"):
+                    info += " · 上次 " + time.strftime(
+                        "%m-%d %H:%M", time.localtime(int(b["last"])))
+                if b["path"] == BUILTIN_NOVEL_PATH:
+                    tip = "内置短篇 · 随软件打包，点「读这本」直接看\n" + info
+                else:
+                    tip = b["path"] + "\n" + info
+                item.setToolTip(tip)
+                item.setSizeHint(QSize(0, 30))
+                self.list.addItem(item)
+            # 当前书默认选中，章节目录跟着它走
+            row = next((i for i in range(self.list.count())
+                        if self.list.item(i).data(Qt.ItemDataRole.UserRole) == current), 0)
+            self.list.setCurrentRow(row)
+        self.list.blockSignals(False)
 
     def selected_path(self):
         item = self.list.currentItem()
@@ -2007,16 +2640,21 @@ class NovelPanel(_BasePanel):
             if not text.strip():
                 skipped.append(f"{os.path.basename(path)}（空文件）")
                 continue
-            last = self.shelf.add(path, text, len(text))
+            last = self.shelf.add(path, text)
             if len(text) > 600000:
                 big.append(os.path.basename(path))
         self.refresh_list()
+        self.refresh_chapters()
+        self.refresh_seek()
         if last:
             for i in range(self.list.count()):
                 if self.list.item(i).data(Qt.ItemDataRole.UserRole) == last["path"]:
                     self.list.setCurrentRow(i)
                     break
-            msg = f"已加入书架：《{last['title']}》，共 {last['total']} 字。点“读这本”开始。"
+            n = self.shelf.chapter_count(last["path"])
+            kind = f"识别到 {n} 节" if n and last.get("chapters") else "按字数自动分节"
+            msg = (f"已加入书架：《{last['title']}》，共 {last['total']:,} 字，{kind}。"
+                   "点“读这本”开始。")
             if big:
                 msg += "\n\n" + "、".join(big) + " 篇幅较长，首次打开要等 1~3 秒。"
         else:
@@ -2040,8 +2678,18 @@ class NovelPanel(_BasePanel):
         path = self.selected_path()
         if not path:
             return
+        if path == BUILTIN_NOVEL_PATH:
+            # 内置示例是随包带的，删了没处恢复；真想清空就用「从头读」
+            styled_message(
+                self, "Niumer · 摸鱼阅读",
+                f"《{BUILTIN_NOVEL_TITLE}》是内置示例，不能移出书架。"
+                "想重看可以点「从头读」。",
+            )
+            return
         self.shelf.remove(path)
         self.refresh_list()
+        self.refresh_chapters()
+        self.refresh_seek()
         if self.bar.novel.book and self.bar.novel.book["path"] == path:
             self.bar.novel.unload()
         self.bar.update_tip()
@@ -2057,8 +2705,165 @@ class NovelPanel(_BasePanel):
         if novel.book and novel.book["path"] == path:
             novel.book["pos"] = 0
             novel.offset = 0.0
+        self.refresh_chapters()
+        self.refresh_seek()
         self.bar.update_tip()
         self.bar.update()
+
+    # ---- 标签页联动 ----
+    def set_tab(self, index):
+        self.tabs.setCurrentIndex(max(0, min(3, int(index))))
+
+    def on_tab_changed(self, index):
+        if index == self.TAB_CHAPTER:
+            self.refresh_chapters()
+        elif index == self.TAB_SEEK:
+            self.refresh_seek()
+
+    def on_book_selection(self):
+        self.refresh_chapters()
+
+    def _ensure_book(self):
+        """章节 / 进度操作前，保证目标书已经载入小条。"""
+        path = self._chapter_path or self.shelf.current
+        if path and path != self.shelf.current:
+            self.bar.novel_switch_book(path)
+        elif self.bar.novel.book is None:
+            self.bar.load_novel_book()
+        return path
+
+    # ---- 书架：快速换书 / 打开目录 ----
+    def step_book(self, delta):
+        path = self.shelf.step_book(delta)
+        if not path:
+            return
+        self.bar.novel_switch_book(path)
+        self.refresh_list()
+        self.refresh_chapters()
+        self.refresh_seek()
+
+    def open_dir_selected(self):
+        path = self.selected_path() or self.shelf.current
+        if not path:
+            return
+        if path == BUILTIN_NOVEL_PATH:
+            styled_message(self, "Niumer · 摸鱼阅读",
+                           "内置短篇随软件打包，没有本地文件。")
+            return
+        folder = os.path.dirname(os.path.abspath(path))
+        if os.path.isdir(folder):
+            try:
+                os.startfile(folder)
+            except OSError:
+                pass
+
+    # ---- 章节目录 ----
+    def refresh_chapters(self):
+        path = self.selected_path() or self.shelf.current
+        self._chapter_path = path or ""
+        self.chapter_list.clear()
+        b = self.shelf.get(path) if path else None
+        if not b:
+            self.chapter_hint.setText("书架里还没有书，先去「书架」导入一本。")
+            return
+        chapters = self.shelf.chapters_for(path)
+        for i, (_, title) in enumerate(chapters):
+            item = QListWidgetItem(f"{i + 1:>3}   {title}")
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            self.chapter_list.addItem(item)
+        cur = -1
+        if path == self.shelf.current and self.bar.novel.book \
+                and self.bar.novel.book["path"] == path:
+            cur = self.bar.novel.chapter_index()
+        if 0 <= cur < self.chapter_list.count():
+            item = self.chapter_list.item(cur)
+            f = item.font()
+            f.setBold(True)
+            item.setFont(f)
+            item.setForeground(QColor(ui_palette()["accent"]))
+            self.chapter_list.setCurrentRow(cur)
+            self.chapter_list.scrollToItem(item)
+        kind = "按原文标题识别" if b.get("chapters") else "没识别到标题，按字数自动分节"
+        tail = f" · 当前：{chapters[cur][1]}" if 0 <= cur < len(chapters) else ""
+        self.chapter_hint.setText(f"共 {len(chapters)} 节（{kind}）{tail}")
+        self.filter_chapters(self.chapter_search.text())
+
+    def filter_chapters(self, keyword):
+        kw = str(keyword or "").strip()
+        for i in range(self.chapter_list.count()):
+            item = self.chapter_list.item(i)
+            self.chapter_list.setRowHidden(i, bool(kw) and kw not in item.text())
+
+    def goto_chapter_selected(self):
+        item = self.chapter_list.currentItem()
+        if not item:
+            return
+        self.goto_chapter(int(item.data(Qt.ItemDataRole.UserRole)))
+
+    def goto_chapter(self, index):
+        self._ensure_book()
+        self.bar.novel_goto_chapter(index)
+        self.refresh_chapters()
+        self.refresh_seek()
+
+    def step_chapter(self, delta):
+        self._ensure_book()
+        self.bar.novel_step_chapter(delta)
+        self.refresh_chapters()
+        self.refresh_seek()
+
+    # ---- 跳转进度 ----
+    def refresh_seek(self):
+        book = self.shelf.current_book()
+        if not book:
+            self.seek_label.setText("书架里还没有书")
+            return
+        novel = self.bar.novel
+        if novel.book and novel.book["path"] == book["path"]:
+            pct, ch = novel.percent(), novel.chapter_label()
+        else:
+            pct, ch = NovelShelf.percent(book), ""
+        self._syncing = True
+        self.seek_slider.setValue(int(pct * 10))
+        self._syncing = False
+        self.seek_label.setText(
+            f"《{book['title']}》　已读 {pct:.1f}%"
+            + (f"　·　{ch}" if ch else "")
+        )
+
+    def on_seek_value(self, value):
+        if self._syncing:
+            return
+        pct = value / 10.0
+        self.seek_label.setText(f"跳到 {pct:.1f}% …")
+        novel = self.bar.novel
+        if novel.book is None:
+            self.bar.load_novel_book()
+        if novel.book:
+            novel.goto_percent(pct, save=False)
+            self.bar.update()
+            self._seek_timer.start(300)
+
+    def commit_seek(self):
+        self._seek_timer.stop()
+        novel = self.bar.novel
+        if novel.book:
+            novel.save()
+            self.shelf.touch(novel.book["path"])
+        self.refresh_seek()
+        self.refresh_chapters()
+        self.bar.novel_refresh()
+
+    def quick_seek(self, pct, relative=False):
+        novel = self.bar.novel
+        if novel.book is None:
+            self.bar.load_novel_book()
+        if novel.book is None:
+            return
+        target = novel.percent() + pct if relative else pct
+        self.bar.novel_seek_percent(target)
+        self.refresh_seek()
+        self.refresh_chapters()
 
     def on_font_changed(self, value):
         self.bar.novel.set_font_size(int(value))
@@ -2076,6 +2881,86 @@ class NovelPanel(_BasePanel):
         self.bar.novel.font_size = int(self.font_spin.value())
         self.bar.novel.speed = float(self.speed_spin.value())
         self.bar.novel.apply_font()
+        self.bar.novel.chapter_ys = None
+
+
+class MuyuPanel(_BasePanel):
+    """电子木鱼面板：看累计、清零，外加一句敲击说明。"""
+
+    def __init__(self, bar):
+        super().__init__(bar)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        head = QLabel("敲一下积一分功德，纯本地保存，不会上传，也没有联网请求。")
+        head.setObjectName("Title")
+        head.setWordWrap(True)
+        root.addWidget(head)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(16, 14, 16, 14)
+        cl.setSpacing(8)
+        cl.addWidget(QLabel("累计功德"))
+        self.count = QLabel(f"{bar.muyu.total:,}")
+        self.count.setObjectName("Title")
+        self.count.setStyleSheet("font-size:30px;")
+        cl.addWidget(self.count)
+        cl.addWidget(QLabel("功德只在点「清零」时消失，重启、换主题都不影响。"))
+        root.addWidget(card)
+
+        how = QGroupBox("怎么敲")
+        hl = QVBoxLayout(how)
+        hl.setContentsMargins(14, 18, 14, 14)
+        hl.setSpacing(6)
+        for line in (
+            "点一下小条让它获得焦点，然后按空格 —— 每按一下 +1",
+            "按住空格不放会连续敲击（用系统按键重复，不是计时机）",
+            "鼠标按住小条超过 250ms 也会开始连击，轻点不敲",
+        ):
+            lab = QLabel("· " + line)
+            lab.setWordWrap(True)
+            hl.addWidget(lab)
+        root.addWidget(how)
+
+        clear_row = QHBoxLayout()
+        clear_row.setSpacing(8)
+        clear = QPushButton("功德清零")
+        clear.setObjectName("Ghost")
+        clear.setMinimumHeight(34)
+        clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear.clicked.connect(self.on_clear)
+        goto = QPushButton("去木鱼页")
+        goto.setObjectName("Primary")
+        goto.setMinimumHeight(34)
+        goto.setCursor(Qt.CursorShape.PointingHandCursor)
+        goto.clicked.connect(lambda: (self.bar.goto_page(PAGE_MUYU), self.window().accept()))
+        clear_row.addWidget(clear)
+        clear_row.addWidget(goto)
+        clear_row.addStretch(1)
+        root.addLayout(clear_row)
+        root.addStretch(1)
+
+    def on_clear(self):
+        if self.bar.muyu.total == 0:
+            return
+        box = QMessageBox(self)
+        apply_dialog_theme(box)
+        box.setWindowTitle("Niumer · 电子木鱼")
+        box.setText(f"确定把累计功德 {self.bar.muyu.total:,} 清零？此操作不可恢复。")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            self.bar.muyu.reset()
+            self.count.setText("0")
+
+    def apply(self):
+        self.bar.update_tip()
+        self.bar.update()
 
 
 PREVIEW_SCALE = 2.15
@@ -2127,6 +3012,8 @@ def render_bar_image(bar, page, weather=False, spelling=False, typed="",
                 bar.draw_weather_page(painter, c)
             else:
                 bar.draw_novel_page(painter, c)
+        elif page == PAGE_MUYU:
+            bar.draw_muyu_page(painter, c)
         bar.draw_page_dots(bar, painter, c)
     finally:
         (bar.view, bar.spelling, bar.spell_input, bar.spell_result,
@@ -2263,40 +3150,43 @@ def help_pages():
     quick = (
         h("它是什么")
         + p("一块 186×32 的小条，贴在任务栏右下角、托盘图标左边。工资条、单词卡、"
-            "摸鱼阅读三页都在这同一条里切换，不会另开窗口，也不会越变越大。")
+            "摸鱼阅读、电子木鱼四页都在这同一条里切换，不会另开窗口，也不会越变越大。")
         + img("taskbar", "位置示意：小条就挨着托盘图标，和时钟、音量排在一起。", 440)
         + h("三个入口")
         + ol([
-            "左键按住小条左右拖 —— 三页之间切换，松手自动吸附",
+            "左键按住小条左右拖 —— 四页之间切换，松手自动吸附",
             "右键小条 —— 菜单：切页、设置中心、使用帮助、隐藏窗口、退出",
             f"隐藏之后按 {k('Ctrl+Q')}，或点托盘图标，就能叫回来",
         ])
         + note("第一次用，先右键 → 设置中心 → 工资条，把月薪填上；其余默认设置就能跑起来。")
-        + h("三页分别是什么")
+        + h("四页分别是什么")
         + table([
             ("第一页", "工资条：每秒都在涨的“工钱”，一眼看到今天赚了多少"),
             ("第二页", "单词卡：一个单词 + 音标释义，轻点后按空格可以默写"),
             ("第三页", "摸鱼阅读：小说正文在条里慢慢滚，鼠标移开自动变天气"),
+            ("第四页", "电子木鱼：按空格敲一下，攒点功德，纯本地保存"),
         ])
     )
 
     salary = (
         h("它在算什么")
-        + p("把月薪折算到秒：月薪 ÷ 22 个工作日 ÷ 8 小时 ÷ 3600 秒。屏幕上那个数字每秒都在涨，"
-            "涨的就是你此刻“已经赚到”的钱。")
+        + p("把月薪折算到秒：月薪 ÷ 每月工作日 ÷ 每天工时（上班到下班的小时数）÷ 3600 秒。"
+            "显示的是「今天从上班到现在」已经过去的那些时间换来的钱 —— 中午才开机，"
+            "也会把上午的部分一起算上；过了下班时间就停在整天的金额。")
         + img("salary", "第一页：左边绿点表示正在计时，右边是每秒进账速率。")
         + h("怎么设置")
         + ol([
             "右键 → 设置中心 → 工资条",
-            "填月薪（也可以直接点 ¥5000 这类预设按钮），点「保存并关闭」",
-            "参数一改，累计金额自动接着算，不会清零",
+            "填月薪（也可以直接点 ¥5000 这类预设按钮）",
+            "设上班、下班时间（默认 09:00 – 18:00）和每月工作日（默认 22 天）",
+            "点「保存并关闭」；改完口径，屏幕上的数字立即按新口径重算",
         ])
         + h("两个常用操作")
         + ol([
             "去开会、午休：点「暂停计时」，绿点变灰，数字停住；回来点「继续计时」",
             "想只看每秒：点「显示每秒」，大数字变成速率，右边显示月薪；再点一次切回累计",
         ])
-        + note("「重置累计金额」只把今天累计的数字清零，不影响月薪设置。")
+        + note("「重置累计金额」只是把今天累计的数字清零，之后从 0 接着涨，第二天自动恢复成整天口径。")
     )
 
     word = (
@@ -2327,21 +3217,65 @@ def help_pages():
     novel = (
         h("导入小说")
         + ol([
-            "右键 → 设置中心 → 摸鱼阅读",
+            "右键 → 设置中心 → 摸鱼阅读 → 书架",
+            f"内置一本短篇《{BUILTIN_NOVEL_TITLE}》，选中后点「读这本」直接看，不用导入",
             "点「导入 txt」，可以一次选多个文件；单个文件 8MB 以内（约 400 万字）",
-            "书架里双击书名，或选中后点「读这本」",
+            "书架里双击书名、点「读这本」，都会自动切到第三页开始读",
+            "「打开所在目录」能直接跳到 txt 文件所在的文件夹",
+        ])
+        + h("换书")
+        + p("阅读面板分成四页：书架、章节目录、跳转进度、手感与伪装。换书有三种走法，"
+            "不用每次都回到列表里挑。")
+        + ol([
+            "书架上的「← 上一本 / 下一本 →」：按书架顺序循环换，不动当前页",
+            "在书架列表里双击书名，或选中后点「读这本」：切换并跳到第三页",
+            f"小条上按 {k('Ctrl+←')} / {k('Ctrl+→')}：换上一本 / 下一本",
+        ])
+        + note("每本书的阅读位置和章节各自保存，切来切去不会串；书架行右侧是各自的进度。")
+        + h("章节目录")
+        + ol([
+            "导入时自动识别独立成行的「第X章 / 第X回 / 卷X / Chapter X」这类标题",
+            "没写章节标题的 txt，会按每 3000 字自动分节，一样能一节节跳",
+            "章节目录页可以搜标题、双击跳到那一节，也能点「上一节 / 下一节」",
+            f"小条上按 {k('[')} / {k(']')} 直接跳上/下一节；托盘提示里能看到当前节名",
+        ])
+        + h("跳转进度")
+        + ol([
+            "跳转进度页拖滑块，松手就保存；下面还有回到开头 / ±10% / 跳到末尾四个按钮",
+            f"小条上 {k('Home')} 回开头、{k('End')} 到末尾、{k('PgUp')} / {k('PgDn')} 翻一屏",
         ])
         + h("怎么读")
         + p("把它拖到第三页，正文就在条里慢慢往上爬。鼠标停在条上才滚，一移开立刻停 —— "
             "有人走过来时手一挪，看着就是一条普通的桌面小工具。")
         + img("novel", "第三页：两行正文，底部细线是全书进度。")
         + ol([
-            "轻点小条：暂停 / 继续滚动",
-            "滚轮停在条上：手动往下翻一点",
-            "底部细线：整本书读到哪了；右边小点：当前在第几页",
+            "轻点小条：暂停 / 继续滚动，同时让小条取得键盘焦点（快捷键才接得到）",
+            f"按 {k('空格')}：暂停 / 继续；滚轮停在条上：手动往下翻一点",
+            "底部细线：整本书读到哪了；右边圆环的绿色段：当前在第几页",
         ])
         + note("阅读位置按字序保存，换字号、重启、切到别的书再切回来，都能接着上次的地方读。"
-               "字号 10～20px、速度 4～80px/秒，在设置里调。")
+               "字号 8～11px（小条高度固定，这个区间才能完整显示两行）、速度 4～80px/秒，在「手感与伪装」里调。")
+    )
+
+    muyu = (
+        h("敲一下，积一分功德")
+        + p("第四页是个电子木鱼。小条左边一只单线简笔木鱼，右边是累计功德。"
+            "敲一下木鱼轻轻左右一颤，旁边飘出一句吉利话，计数 +1。"
+            "没有联网、没有账号、没有排行榜，纯本地存一个数。")
+        + img("muyu", "第四页：左边简笔木鱼，右边累计数；敲下去木鱼微颤、飘出文案。")
+        + h("怎么敲")
+        + ol([
+            "把它拖到第四页，轻点小条让它得到键盘焦点",
+            f"按 {k('空格')}：敲一下；按住不放会自动连击",
+            "鼠标按住小条超过 250ms：开始连击，每 160ms 一下；轻点不算敲",
+            "想停就松手；切到别的页时连击自动停",
+        ])
+        + note("飘出来的文案从「功德+1 / 财富+1 / 好运+1 / 开心+1 / 摸鱼+1」里随机取，"
+               "最多同时飘 4 条，半秒左右淡出，颜色都很淡，不会晃眼。")
+        + h("功德数")
+        + p("只显示一个累计值，跨天、重启、换主题都不清零。"
+            "设置中心 → 电子木鱼里能看到当前数字，也可以清零（会先问一句）。")
+        + note("数字只存在本机注册表里，卸载软件不会自动删除，重装回来还在。")
     )
 
     weather = (
@@ -2378,14 +3312,15 @@ def help_pages():
     )
 
     settings = (
-        h("五个面板")
-        + p("右键小条 → 设置中心。左边五张卡选功能，右边改参数，底部两个按钮。")
+        h("六个面板")
+        + p("右键小条 → 设置中心。左边六张卡选功能，右边改参数，底部两个按钮。")
         + img("settings", "设置中心：左侧选功能，右侧改参数，右下角「保存并关闭」。", 700)
         + table([
-            ("工资条", "月薪、暂停/继续、显示累计或每秒、重置累计"),
+            ("工资条", "月薪、上下班时间、每月工作日、暂停/继续、显示累计或每秒、重置累计"),
             ("单词卡", "换词库（四级/六级/考研）、看进度、续背/跳到未掌握/重置"),
             ("健康提醒", "三类提醒的开关、间隔、文案，以及提醒时段"),
-            ("摸鱼阅读", "书架、导入 txt、正文字号、滚动速度、天气伪装"),
+            ("摸鱼阅读", "书架与换书、章节目录、进度滑块、字号/速度、天气伪装（四页）"),
+            ("电子木鱼", "累计功德、清零、敲击方式说明"),
             ("外观", "深色 / 浅色主题，切换后立即生效"),
         ])
         + note("改完一定要点右下角「保存并关闭」。直接点窗口右上角的 × 关闭不会保存。")
@@ -2395,14 +3330,19 @@ def help_pages():
     keypage = (
         h("鼠标")
         + table([
-            (k("左键拖动"), "切换三页，松手自动吸附到最近一页"),
-            (k("左键轻点"), "单词页：取得键盘焦点；小说页：暂停 / 继续滚动"),
-            (k("右键"), "弹出菜单"),
+            (k("左键拖动"), "切换四页，松手自动吸附到最近一页"),
+            (k("左键轻点"), "单词页：取得键盘焦点；小说页：暂停 / 继续并取焦点；木鱼页：取焦点，不敲"),
+            (k("鼠标长按"), "木鱼页：按住 250ms 后连击，每 160ms 一下"),
+            (k("右键"), "弹出菜单：切换页面、设置中心、使用帮助、隐藏 / 显示、退出"),
             (k("滚轮"), "小说页：手动滚动正文"),
         ])
         + h("键盘")
         + table([
-            (k("空格"), "单词页：开始默写；判定完再按一次进入下一个词"),
+            (k("空格"), "单词页：开始默写；小说页：暂停 / 继续；木鱼页：敲一下，按住连击"),
+            (k("Home / End"), "小说页：回到开头 / 跳到末尾"),
+            (k("PgUp / PgDn"), "小说页：向上 / 向下翻一屏"),
+            (k("[ / ]"), "小说页：上一节 / 下一节"),
+            (k("Ctrl+← / →"), "小说页：换上一本 / 下一本"),
             (k("Backspace"), "默写时删掉一个字母"),
             (k("Esc"), "退出默写"),
             (k("Ctrl+Q"), "全局热键：隐藏 / 显示小条"),
@@ -2411,7 +3351,8 @@ def help_pages():
                "用右键菜单里的「隐藏窗口 / 显示窗口」一样管用。")
         + h("托盘图标")
         + p("右键托盘图标同样是那个菜单；左键点一下，隐藏的小条会重新出现。"
-            "鼠标悬停在图标上能看到当前状态：累计金额、单词进度或阅读进度，以及下次提醒还有多久。")
+            "鼠标悬停在图标上能看到当前状态：累计金额、单词进度，"
+            "读到小说时会显示书名、百分比和当前节名，以及下次提醒还有多久。")
     )
 
     data = (
@@ -2486,6 +3427,7 @@ def help_pages():
         ("工资条", salary),
         ("单词卡", word),
         ("摸鱼阅读", novel),
+        ("电子木鱼", muyu),
         ("天气伪装", weather),
         ("健康提醒", remind),
         ("设置中心", settings),
@@ -2631,6 +3573,7 @@ class HelpDialog(QDialog):
             ("salary", dict(page=PAGE_SALARY)),
             ("word", dict(page=PAGE_WORD)),
             ("novel", dict(page=PAGE_NOVEL)),
+            ("muyu", dict(page=PAGE_MUYU)),
         ):
             try:
                 images[name] = render_bar_image(bar, **kwargs)
@@ -2661,6 +3604,111 @@ class HelpDialog(QDialog):
             self.browser.verticalScrollBar().setValue(0)
 
 
+class NavIcon(QWidget):
+    """设置中心左侧的单线简笔图标，QPainter 手绘，不依赖图片或字体。"""
+
+    def __init__(self, kind, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self.checked = False
+        self.setFixedSize(28, 28)
+
+    def set_checked(self, on):
+        if self.checked != on:
+            self.checked = on
+            self.update()
+
+    def paintEvent(self, event):
+        p = ui_palette()
+        # 背景自己画：QSS 的 QLabel#NavBadgeChecked 对自定义 QWidget 不生效，
+        # 白线画在浅灰底上会看不清。这里选中态画实底、线条转白，保证对比度。
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        bg = QColor(p["accent"]) if self.checked else QColor(p["accent_soft"])
+        color = QColor("#ffffff") if self.checked else QColor(p["accent"])
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 8, 8)
+
+        pen = QPen(color, 1.4, Qt.PenStyle.SolidLine)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        cx, cy = w / 2.0, h / 2.0
+
+        if self.kind == "salary":
+            # 硬币：外圆 + 内圆 + 一枚小钱字符（用两横一竖抽象表示）
+            painter.drawEllipse(QPointF(cx, cy), 9, 9)
+            painter.drawEllipse(QPointF(cx, cy), 6.2, 6.2)
+            painter.drawLine(QPointF(cx, cy - 3.5), QPointF(cx, cy + 3.5))
+            painter.drawLine(QPointF(cx - 2.6, cy - 1.6), QPointF(cx + 2.6, cy - 1.6))
+            painter.drawLine(QPointF(cx - 2.6, cy + 1.4), QPointF(cx + 2.6, cy + 1.4))
+        elif self.kind == "words":
+            # 单词卡：一张卷角卡片 + 三行字线
+            card = QPainterPath()
+            card.moveTo(cx - 8, cy - 9)
+            card.lineTo(cx + 5, cy - 9)
+            card.lineTo(cx + 8, cy - 6)
+            card.lineTo(cx + 8, cy + 9)
+            card.lineTo(cx - 8, cy + 9)
+            card.closeSubpath()
+            painter.drawPath(card)
+            painter.drawLine(QPointF(cx + 5, cy - 9), QPointF(cx + 5, cy - 6))
+            painter.drawLine(QPointF(cx + 5, cy - 6), QPointF(cx + 8, cy - 6))
+            for dy in (-2, 2, 6):
+                painter.drawLine(QPointF(cx - 5, cy + dy), QPointF(cx + 4, cy + dy))
+        elif self.kind == "remind":
+            # 铃铛：钟体 + 钟舌 + 顶部小柄
+            body = QPainterPath()
+            body.moveTo(cx - 7, cy + 5)
+            body.quadTo(cx - 6, cy - 7, cx, cy - 7)
+            body.quadTo(cx + 6, cy - 7, cx + 7, cy + 5)
+            body.closeSubpath()
+            painter.drawPath(body)
+            painter.drawLine(QPointF(cx - 9, cy + 5), QPointF(cx + 9, cy + 5))
+            painter.drawEllipse(QPointF(cx, cy + 8), 1.3, 1.3)
+            painter.drawLine(QPointF(cx, cy - 7), QPointF(cx, cy - 9.5))
+        elif self.kind == "novel":
+            # 翻开的书：中缝 + 两侧书页弧线
+            book = QPainterPath()
+            book.moveTo(cx, cy - 6)
+            book.quadTo(cx - 5, cy - 9, cx - 10, cy - 7)
+            book.lineTo(cx - 10, cy + 6)
+            book.quadTo(cx - 5, cy + 4, cx, cy + 7)
+            book.quadTo(cx + 5, cy + 4, cx + 10, cy + 6)
+            book.lineTo(cx + 10, cy - 7)
+            book.quadTo(cx + 5, cy - 9, cx, cy - 6)
+            painter.drawPath(book)
+            painter.drawLine(QPointF(cx, cy - 6), QPointF(cx, cy + 7))
+        elif self.kind == "muyu":
+            # 木鱼：椭圆轮廓 + 开口缝 + 小木槌（与第四页一致）
+            painter.drawEllipse(QRectF(cx - 9, cy - 6, 18, 12))
+            slit = QPainterPath()
+            slit.moveTo(cx - 6, cy - 1)
+            slit.quadTo(cx - 1, cy + 3, cx + 4, cy - 2)
+            painter.drawPath(slit)
+            painter.drawLine(QPointF(cx + 8, cy - 9), QPointF(cx + 3, cy - 3))
+            painter.drawEllipse(QPointF(cx + 8, cy - 9), 1.8, 1.8)
+        elif self.kind == "appearance":
+            # 日月：左半边月牙（空心）+ 右半边太阳带光芒，一眼看懂深浅主题
+            moon = QPainterPath()
+            moon.moveTo(cx + 0.5, cy - 8)
+            moon.arcTo(QRectF(cx - 8, cy - 8, 16, 16), 90, 180)
+            moon.quadTo(cx + 4, cy, cx + 0.5, cy - 8)
+            painter.drawPath(moon)
+            painter.drawEllipse(QPointF(cx + 4, cy), 3.2, 3.2)
+            for a in (0, 60, 120, 180, 240, 300):
+                rad = math.radians(a)
+                x1 = cx + 4 + math.cos(rad) * 5.2
+                y1 = cy + math.sin(rad) * 5.2
+                x2 = cx + 4 + math.cos(rad) * 7.0
+                y2 = cy + math.sin(rad) * 7.0
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        painter.end()
+
+
 class SettingsCenter(QDialog):
     """统一设置中心：左侧图标导航，右侧配置面板。
 
@@ -2669,11 +3717,12 @@ class SettingsCenter(QDialog):
     """
 
     CARDS = (
-        ("salary", "¥", "工资条", "月薪与每秒进账"),
-        ("words", "A", "单词卡", "词库与默写"),
-        ("remind", "!", "健康提醒", "喝水 · 活动 · 护眼"),
-        ("novel", "书", "摸鱼阅读", "TXT 自动滚"),
-        ("appearance", "◐", "外观", "主题 · 深浅色"),
+        ("salary", "salary", "工资条", "月薪、作息与每秒进账"),
+        ("words", "words", "单词卡", "词库与默写"),
+        ("remind", "remind", "健康提醒", "喝水 · 活动 · 护眼"),
+        ("novel", "novel", "摸鱼阅读", "TXT 自动滚"),
+        ("muyu", "muyu", "电子木鱼", "敲一敲 · 攒功德"),
+        ("appearance", "appearance", "外观", "主题 · 深浅色"),
     )
 
     def __init__(self, bar, parent=None):
@@ -2690,9 +3739,7 @@ class SettingsCenter(QDialog):
             QPushButton#NavCard {{ border-radius:8px; padding:8px 10px; }}
             QLabel#NavTitle {{ font-size:13px; font-weight:600; color:{p['text']}; background:transparent; }}
             QLabel#NavSub {{ font-size:11px; color:{p['sub']}; background:transparent; }}
-            QLabel#NavBadge {{ font-size:13px; font-weight:700; color:{p['accent']};
-                background:{p['accent_soft']}; border-radius:8px; }}
-            QLabel#NavBadgeChecked {{ background:{p['accent']}; color:#ffffff; border-radius:8px; font-weight:700; font-size:13px; }}
+            /* NavBadge 是自定义 QWidget，背景和线条由 NavIcon.paintEvent 自己画 */
         """)
 
         outer = QVBoxLayout(self)
@@ -2726,7 +3773,7 @@ class SettingsCenter(QDialog):
         nl.setSpacing(4)
         self.nav_group = []
         self.nav_badges = {}
-        for key, icon, title_text, sub in self.CARDS:
+        for key, icon_kind, title_text, sub in self.CARDS:
             btn = QPushButton()
             btn.setObjectName("NavCard")
             btn.setCheckable(True)
@@ -2734,10 +3781,8 @@ class SettingsCenter(QDialog):
             bl = QHBoxLayout(btn)
             bl.setContentsMargins(8, 4, 8, 4)
             bl.setSpacing(10)
-            badge = QLabel(icon)
+            badge = NavIcon(icon_kind)
             badge.setObjectName("NavBadge")
-            badge.setFixedSize(28, 28)
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             texts = QVBoxLayout()
             texts.setSpacing(1)
             t = QLabel(title_text)
@@ -2761,6 +3806,7 @@ class SettingsCenter(QDialog):
             "words": WordsPanel(bar),
             "remind": ReminderPanel(bar),
             "novel": NovelPanel(bar),
+            "muyu": MuyuPanel(bar),
             "appearance": AppearancePanel(bar),
         }
         for key, panel in self.panels.items():
@@ -2797,21 +3843,16 @@ class SettingsCenter(QDialog):
     def show_panel(self, key):
         for k, btn in self.nav_group:
             btn.setChecked(k == key)
-        # 选中态：badge 实底
+        # 选中态：背景和线条颜色由 NavIcon 自己画（QSS 对自定义 QWidget 不生效）
         for k, badge in self.nav_badges.items():
-            if k == key:
-                badge.setObjectName("NavBadgeChecked")
-            else:
-                badge.setObjectName("NavBadge")
-            # 触发样式刷新
-            badge.style().unpolish(badge)
-            badge.style().polish(badge)
+            badge.set_checked(k == key)
         idx = list(self.panels.keys()).index(key)
         self.stack.setCurrentIndex(idx)
 
     def accept(self):
         for panel in self.panels.values():
-            panel.apply()
+            if panel.apply() is False:
+                return
         super().accept()
 
 
@@ -2821,11 +3862,27 @@ class SalaryBar(QWidget):
         self.app = app
         self.settings = QSettings("Niumer", "Niumer")
         self.monthly = float(self.settings.value("monthly_salary", 3000.0))
+        # 上下班时间、每月工作日都可配；金额按「今天已经过去的上班时间」折算，
+        # 不是从打开软件那一刻起从 0 累加 —— 中午才开机也不会少算。
+        self.work_start = clock_time(self.settings.value("work_start"), DEFAULT_WORK_START)
+        self.work_end = clock_time(self.settings.value("work_end"), DEFAULT_WORK_END)
+        if self.work_start.secsTo(self.work_end) <= 0:
+            # 存档里是「下班早于上班」这类坏数据：退回默认作息，否则金额会一直停在 0
+            self.work_start = clock_time(DEFAULT_WORK_START, DEFAULT_WORK_START)
+            self.work_end = clock_time(DEFAULT_WORK_END, DEFAULT_WORK_END)
+            self.settings.setValue("work_start", DEFAULT_WORK_START)
+            self.settings.setValue("work_end", DEFAULT_WORK_END)
+        try:
+            self.work_days = int(self.settings.value("work_days", DEFAULT_WORK_DAYS)
+                                 or DEFAULT_WORK_DAYS)
+        except (TypeError, ValueError):
+            self.work_days = DEFAULT_WORK_DAYS
+        self.work_days = max(1, min(31, self.work_days))
         self.show_total = True
         self.paused = False
-        self.earned_base = 0.0
-        self.elapsed = QElapsedTimer()
-        self.elapsed.start()
+        self.paused_value = 0.0
+        self.reset_day = None      # 重置累计金额的那一天
+        self.reset_value = 0.0     # 重置那一刻今天已经赚到的钱
         self.phase = 0.0
         self.shown_earned = self.earned
         self.shown_rate = self.rate
@@ -2834,6 +3891,15 @@ class SalaryBar(QWidget):
         self.shelf = NovelShelf(self.settings)
         self.novel = NovelView(self.settings, self.shelf)
         self.novel_paused = False
+
+        # 电子木鱼：只存累计值；长按 250ms 起连击，每 160ms 一下
+        self.muyu = MuyuCounter(self.settings)
+        self.muyu_hold_timer = QTimer(self)
+        self.muyu_hold_timer.setSingleShot(True)
+        self.muyu_hold_timer.timeout.connect(self.start_muyu_repeat)
+        self.muyu_repeat_timer = QTimer(self)
+        self.muyu_repeat_timer.timeout.connect(self.muyu_hit_once)
+        self.muyu_repeating = False
         self.hover_inside = False
         self.novel_save_at = 0.0
 
@@ -2904,6 +3970,12 @@ class SalaryBar(QWidget):
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self.animate)
         self.anim_timer.start(100)
+
+        # 木鱼浮字/微震专用动画：33ms 一帧（30fps），只在有动画时跑，
+        # 100ms 的主动画帧率对 350~600ms 的浮字太粗，看着一顿一顿。
+        self.muyu_anim_timer = QTimer(self)
+        self.muyu_anim_timer.timeout.connect(self.animate_muyu)
+        self.muyu_anim_timer.setInterval(33)
 
         # 健康提醒：每秒检查是否到点
         self.remind_timer = QTimer(self)
@@ -2985,13 +4057,32 @@ class SalaryBar(QWidget):
         '''
 
     @property
+    def work_seconds_per_day(self) -> int:
+        return max(0, self.work_start.secsTo(self.work_end))
+
+    @property
     def rate(self):
-        return per_second(self.monthly)
+        month_seconds = self.work_days * self.work_seconds_per_day
+        return self.monthly / month_seconds if month_seconds > 0 else 0.0
+
+    def earned_today(self) -> float:
+        """今天从上班时间到现在已经过去的秒数 × 每秒进账。
+
+        直接读系统时钟，所以中午才打开、休眠唤醒、手动改时间都能算对；
+        早于上班时间是 0，过了下班时间就封顶为整天。
+        """
+        now = QTime.currentTime()
+        worked = min(max(self.work_start.secsTo(now), 0), self.work_seconds_per_day)
+        return worked * self.rate
 
     @property
     def earned(self):
-        seconds = 0.0 if self.paused else self.elapsed.elapsed() / 1000.0
-        return self.earned_base + seconds * self.rate
+        if self.paused:
+            return self.paused_value
+        value = self.earned_today()
+        if self.reset_day == datetime.date.today():
+            value = max(0.0, value - self.reset_value)
+        return value
 
     def colors(self):
         if is_light_theme():
@@ -3020,7 +4111,14 @@ class SalaryBar(QWidget):
 
     def animate(self):
         self.phase += 0.13
-        self.update()
+        # 木鱼敲击后要持续刷到微震和浮字都结束，不能只刷一帧
+        if self.page == PAGE_MUYU:
+            elapsed = (time.monotonic() - self.muyu.hit_at) * 1000.0 \
+                if self.muyu.hit_at else 9999.0
+            if elapsed <= MUYU_HIT_ANIM_MS or self.muyu.floats:
+                self.update()
+        else:
+            self.update()
 
     def update_tip(self):
         """只在托盘图标上挂一行简短悬停提示。
@@ -3034,7 +4132,14 @@ class SalaryBar(QWidget):
             head = f"Niumer ¥{money(self.earned)}（¥{fmt_rate(self.rate)}/秒）"
         elif self.page == PAGE_NOVEL:
             book = self.shelf.current_book()
-            head = "摸鱼阅读 · 未导入" if book is None else f"摸鱼阅读 {self.novel.percent():.1f}%"
+            if book is None:
+                head = "摸鱼阅读 · 未导入"
+            else:
+                ch = self.novel.chapter_label()
+                head = (f"《{book['title']}》 {self.novel.percent():.1f}%"
+                        + (f" · {ch}" if ch else ""))
+        elif self.page == PAGE_MUYU:
+            head = f"电子木鱼 · 累计功德 {self.muyu.total}"
         else:
             head = f"{self.deck.deck_name} {self.deck.index + 1}/{len(self.deck.words)}"
         tail = f" · 下次{due[1]} {fmt_duration(due[0])}" if due else ""
@@ -3143,6 +4248,8 @@ class SalaryBar(QWidget):
                     self.draw_weather_page(painter, c)
                 else:
                     self.draw_novel_page(painter, c)
+            elif idx == PAGE_MUYU:
+                self.draw_muyu_page(painter, c)
             painter.restore()
         painter.restore()
 
@@ -3445,22 +4552,137 @@ class SalaryBar(QWidget):
             QRectF(PAD_L, 15, right - PAD_L, 15), Qt.AlignmentFlag.AlignVCenter, line
         )
 
+    def draw_muyu_page(self, painter, c):
+        """电子木鱼：左侧单线简笔木鱼 + 右侧累计数 + 飘动的柔和文案。
+
+        全部用 QPainterPath / drawText 画，不引外部图片。动画由 hit_at 与浮字队列
+        的相对时间推出，animate() 每 100ms 刷一次；浮字最多 4 条，向上飘并淡出。
+        """
+        h = self.height()
+        right = self.width() - DOTS_ZONE
+        now = time.monotonic()
+        elapsed = (now - self.muyu.hit_at) * 1000.0 if self.muyu.hit_at else 9999.0
+
+        ink = c["sub"]          # 柔和深灰，浅色主题下不刺眼
+        faint = c["faint"]
+
+        # ---- 左侧：透明底单线简笔木鱼 ----
+        cx, cy = 17.0, h / 2.0
+        # 左右微震：150ms 内幅度 1.2px 的快速衰减抖动，不缩放
+        dx = 0.0
+        if elapsed <= MUYU_HIT_ANIM_MS:
+            p = elapsed / MUYU_HIT_ANIM_MS
+            dx = math.sin(p * math.pi * 6) * 1.2 * (1.0 - p)
+        painter.save()
+        painter.translate(dx, 0)
+        pen = QPen(ink, 1.0, Qt.PenStyle.SolidLine)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # 鱼身：一道扁椭圆轮廓
+        painter.drawEllipse(QRectF(cx - 8.5, cy - 5.5, 17, 11))
+        # 木鱼背上的开口缝：一条上扬的短线
+        slit = QPainterPath()
+        slit.moveTo(cx - 5.5, cy - 1.5)
+        slit.quadTo(cx - 1.0, cy + 2.0, cx + 3.5, cy - 2.0)
+        painter.drawPath(slit)
+        # 鱼眼
+        painter.setBrush(QBrush(ink))
+        painter.drawEllipse(QPointF(cx - 4.5, cy - 2.5), 0.8, 0.8)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # 木槌：斜搭在右上，顶端一个小圆头
+        painter.setPen(QPen(ink, 1.0, Qt.PenStyle.SolidLine))
+        painter.drawLine(QPointF(cx + 10, cy - 8), QPointF(cx + 4, cy - 3))
+        painter.drawEllipse(QPointF(cx + 10, cy - 8), 1.8, 1.8)
+        painter.restore()
+
+        # ---- 右侧：累计数，敲击时平滑小幅跳动 ----
+        text = f"{self.muyu.total:,}"
+        font = fit_font(text, 66, range(16, 8, -1), family="Consolas")
+        jump = 0.0
+        if elapsed <= MUYU_HIT_ANIM_MS:
+            p = elapsed / MUYU_HIT_ANIM_MS
+            jump = -2.0 * math.sin(p * math.pi)   # 轻轻上抬 2px 再落回
+        painter.setFont(font)
+        painter.setPen(c["text"])
+        painter.drawText(
+            QRectF(right - 68, jump, 66, h),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, text,
+        )
+
+        # ---- 浮动文案：从木鱼右侧冒出，向右上飘远并淡出 ----
+        floats = self.muyu.live_floats(now)
+        if floats:
+            painter.save()
+            # 允许浮字飘进数字区：两者颜色、字号差异大，短暂叠加能分辨；
+            # clip 到内容区右界，飘到边界时正好接近淡出末期，不会显得突兀。
+            painter.setClipRect(QRectF(28, 0, right - 28, h))
+            ff = QFont("Microsoft YaHei")
+            ff.setPixelSize(10)
+            ff.setBold(True)
+            painter.setFont(ff)
+            palette = MUYU_COLORS_LIGHT if is_light_theme() else MUYU_COLORS_DARK
+            # 内容区只放得下一条文案宽，多条同屏靠"分层"区分：
+            # 每条占一个横向车道，越晚的越靠右；同时按出现顺序错开纵向高度。
+            for lane, (word, ci, born, life) in enumerate(floats):
+                p = (now - born) / life
+                if p >= 1.0:
+                    continue
+                e = 1.0 - (1.0 - p) ** 2
+                # 横向：起点按车道错开，向右飘 52px（之前只有 10px）
+                x = 30 + lane * 6 + e * 52
+                # 前 65% 接近全不透明，最后 35% 才淡出；
+                # 飘进数字区后略降透明度，免得盖住计数
+                fade = 1.0 if p <= 0.65 else max(0.0, (1.0 - p) / 0.35)
+                if x > right - 68:
+                    fade *= 0.78
+                color = QColor(palette[ci])
+                color.setAlphaF(fade)
+                painter.setPen(color)
+                # 纵向：每条车道一个基准高度，各自向上飘 12px，互不追尾
+                base_y = (h - 2) - lane * 3
+                y = base_y - e * 12
+                painter.drawText(
+                    QRectF(x, y - 12, 60, 12),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, word,
+                )
+            painter.restore()
+        else:
+            # 没在飘的时候给一句极淡的提示
+            tip = QFont("Microsoft YaHei")
+            tip.setPixelSize(9)
+            painter.setFont(tip)
+            painter.setPen(faint)
+            painter.drawText(
+                QRectF(30, 0, right - 30 - 68, h),
+                Qt.AlignmentFlag.AlignVCenter, "空格敲击",
+            )
+
     @staticmethod
     def draw_page_dots(bar, painter, c):
-        """右侧页码指示：当前页是一条小横杠，其余是小圆点，一眼能看出在第几页。"""
-        h = bar.height()
-        w = bar.width()
+        """右侧页码指示：一个圆环按页数等分，当前页那段用绿色突出。
+
+        圆环尺寸固定，不随页数变；加页只是多分几段，不会再往左挤占内容区。
+        圆心固定在右侧 DOTS_ZONE 内，左缘 ≈165，远离内容右界 152。
+        """
+        w, h = bar.width(), bar.height()
         current = int(round(bar.view))
-        cy = h / 2
-        painter.setPen(Qt.PenStyle.NoPen)
+        r = 7.0
+        cx, cy = w - 12.0, h / 2.0
+        rect = QRectF(cx - r, cy - r, r * 2, r * 2)
+
+        active = QColor(46, 139, 87) if is_light_theme() else QColor(102, 194, 153)
+        step = 360.0 / PAGE_COUNT
+        gap = 16.0                       # 段与段之间留缺口，四段之间看得清
+        span = step - gap
         for i in range(PAGE_COUNT):
-            x = (w - 11) - 7 * (PAGE_COUNT - 1 - i)
-            if i == current:
-                painter.setBrush(c["green"])
-                painter.drawRoundedRect(QRectF(x - 3.2, cy - 1.3, 6.4, 2.6), 1.3, 1.3)
-            else:
-                painter.setBrush(c["faint"])
-                painter.drawEllipse(QPointF(x, cy), 1.7, 1.7)
+            pen = QPen(active if i == current else c["faint"], 2.0)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            # Qt 角度：0° 在 3 点方向、顺时针为正；从 12 点(-90°)开始分段
+            start = -90.0 + i * step + gap / 2.0
+            painter.drawArc(rect, int(start * 16), int(span * 16))
 
     # ---- 滑动切页 ----
     def on_view_changed(self, value):
@@ -3475,6 +4697,8 @@ class SalaryBar(QWidget):
             self.spelling = False
             self.spell_input = ""
             self.spell_result = None
+        if self.page != PAGE_MUYU:
+            self.stop_muyu_repeat()
         if self.page == PAGE_NOVEL:
             # 滑到小说页才载入正文，避免开机就白读一遍大文件
             self.load_novel_book()
@@ -3487,6 +4711,8 @@ class SalaryBar(QWidget):
 
     def animate_view(self, target):
         target = max(0, min(PAGE_COUNT - 1, int(target)))
+        # 切页一开始就停连击，别让动画那 260ms 里还在敲
+        self.stop_muyu_repeat()
         self.view_anim.stop()
         self.view_anim.setStartValue(self.view)
         self.view_anim.setEndValue(float(target))
@@ -3502,6 +4728,10 @@ class SalaryBar(QWidget):
             self.drag_x = event.position().x()
             self.drag_page = int(round(self.view))
             self.drag_distance = 0.0
+            # 木鱼页：按住一小会儿才开始连击，轻点不算
+            if self.page == PAGE_MUYU and int(round(self.view)) == PAGE_MUYU:
+                self.setFocus()
+                self.muyu_hold_timer.start(MUYU_HOLD_MS)
         elif event.button() == Qt.MouseButton.RightButton:
             self.update_menu()
             self.menu.exec(event.globalPosition().toPoint())
@@ -3511,6 +4741,8 @@ class SalaryBar(QWidget):
             dx = event.position().x() - self.drag_x
             self.drag_distance = max(self.drag_distance, abs(dx))
             if self.drag_distance > 3:
+                # 一旦开始拖动就取消敲击，别边拖边敲
+                self.stop_muyu_repeat()
                 target = self.drag_page - dx / self.width()
                 self.view = max(0.0, min(float(PAGE_COUNT - 1), target))
                 self.update()
@@ -3518,6 +4750,7 @@ class SalaryBar(QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.dragging:
             self.dragging = False
+            self.stop_muyu_repeat()
             dx = event.position().x() - self.drag_x
             if self.drag_distance > 22 and abs(dx) > 18:
                 target = self.drag_page + (-1 if dx > 0 else 1)
@@ -3526,17 +4759,75 @@ class SalaryBar(QWidget):
                 # 轻点单词页：取得焦点，可直接按空格开始默写
                 if target == PAGE_WORD and self.spell_result is None:
                     self.setFocus()
+                elif target == PAGE_MUYU:
+                    # 木鱼页轻点只取焦点，不敲；敲击靠空格或长按
+                    self.setFocus()
+                    self.update_tip()
+                    return
                 elif target == PAGE_NOVEL:
-                    # 轻点小说页：暂停/继续；没书就去选文件
+                    # 轻点小说页：暂停/继续，顺便取焦点好接键盘快捷键；没书就去选文件
                     if self.shelf.current_book() is None:
                         self.open_settings_center("novel")
                         return
+                    self.setFocus()
                     self.load_novel_book()
                     self.novel_paused = not self.novel_paused
                     self.update_tip()
                     self.update()
                     return
             self.animate_view(target)
+
+    # ---- 小说：换书 / 跳章 / 跳进度（阅读页面本身不动） ----
+    def novel_refresh(self):
+        self.update_tip()
+        self.update()
+
+    def novel_switch_book(self, path, goto=False):
+        """切到书架里另一本；已读位置各自保留。"""
+        if not path or not self.shelf.get(path):
+            return False
+        if self.novel.book:
+            self.novel.save()
+        self.shelf.set_current(path)
+        ok = self.load_novel_book(
+            notify=lambda t, m: styled_message(self, t, m, QMessageBox.Icon.Warning)
+        )
+        if goto:
+            self.goto_page(PAGE_NOVEL)
+        self.novel_refresh()
+        return ok
+
+    def novel_step_book(self, delta, goto=False):
+        return self.novel_switch_book(self.shelf.step_book(delta), goto=goto)
+
+    def novel_action(self, fn, *args):
+        """跳转类操作的统一入口：确保正文已载入、存进度、刷提示。"""
+        if self.novel.book is None:
+            self.load_novel_book()
+        if self.novel.book is None:
+            return False
+        result = fn(*args)
+        self.shelf.touch(self.novel.book["path"])
+        self.novel_refresh()
+        return result
+
+    def novel_seek_percent(self, pct):
+        return self.novel_action(self.novel.goto_percent, pct)
+
+    def novel_goto_chapter(self, index):
+        return self.novel_action(self.novel.goto_chapter, index)
+
+    def novel_step_chapter(self, delta):
+        return self.novel_action(self.novel.step_chapter, delta)
+
+    def novel_goto_start(self):
+        return self.novel_action(self.novel.goto_start)
+
+    def novel_goto_end(self):
+        return self.novel_action(self.novel.goto_end)
+
+    def novel_page_scroll(self, sign):
+        return self.novel_action(self.novel.page_scroll, sign)
 
     # ---- 小说：条内滚动 ----
     def load_novel_book(self, notify=None):
@@ -3673,8 +4964,67 @@ class SalaryBar(QWidget):
             self.update()
             self.update_tip()
 
+    # ---- 电子木鱼：敲击与连击 ----
+    def muyu_hit_once(self):
+        self.muyu.hit()
+        # 有动画就开 30fps 定时器，动画自己会停
+        if not self.muyu_anim_timer.isActive():
+            self.muyu_anim_timer.start()
+        self.update()
+
+    def animate_muyu(self):
+        """木鱼动画帧：飘字/微震结束后自动停表，别空转吃 CPU。"""
+        self.update()
+        now = time.monotonic()
+        elapsed = (now - self.muyu.hit_at) * 1000.0 if self.muyu.hit_at else 9999.0
+        # live_floats 顺手清掉过期项，队列空且微震结束就可以停了
+        self.muyu.live_floats(now)
+        if elapsed > MUYU_HIT_ANIM_MS and not self.muyu.floats:
+            self.muyu_anim_timer.stop()
+
+    def start_muyu_repeat(self):
+        """按住超过阈值后进入连击：立刻敲一下，之后定时重复。"""
+        if self.page != PAGE_MUYU:
+            return
+        self.muyu_repeating = True
+        self.muyu_hit_once()
+        self.muyu_repeat_timer.start(MUYU_REPEAT_MS)
+        self.update()
+
+    def stop_muyu_repeat(self):
+        self.muyu_hold_timer.stop()
+        self.muyu_repeat_timer.stop()
+        self.muyu_repeating = False
+
     # ---- 单词默写 ----
     def keyPressEvent(self, event):
+        # 木鱼页：空格敲一下；系统的按键重复事件天然形成连击
+        if self.page == PAGE_MUYU and int(round(self.view)) == PAGE_MUYU:
+            if int(event.key()) == VK_SPACE:
+                self.muyu_hit_once()
+            return
+        if self.page == PAGE_NOVEL and int(round(self.view)) == PAGE_NOVEL:
+            key = int(event.key())
+            text = event.text()
+            ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            if ctrl and key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+                self.novel_step_book(-1 if key == int(Qt.Key.Key_Left) else 1)
+            elif key == VK_SPACE:
+                self.novel_paused = not self.novel_paused
+                self.novel_refresh()
+            elif key == int(Qt.Key.Key_Home):
+                self.novel_goto_start()
+            elif key == int(Qt.Key.Key_End):
+                self.novel_goto_end()
+            elif key in (int(Qt.Key.Key_PageUp), int(Qt.Key.Key_Up)):
+                self.novel_page_scroll(-1)
+            elif key in (int(Qt.Key.Key_PageDown), int(Qt.Key.Key_Down)):
+                self.novel_page_scroll(1)
+            elif key == int(Qt.Key.Key_Left) or text == "[":
+                self.novel_step_chapter(-1)
+            elif key == int(Qt.Key.Key_Right) or text == "]":
+                self.novel_step_chapter(1)
+            return
         if self.page != PAGE_WORD or int(round(self.view)) != PAGE_WORD:
             super().keyPressEvent(event)
             return
@@ -3753,10 +5103,12 @@ class SalaryBar(QWidget):
         if fired:
             self.update_tip()
 
-    def open_settings_center(self, panel_key="salary"):
+    def open_settings_center(self, panel_key="salary", novel_tab=None):
         """统一设置中心：工资 / 单词 / 健康提醒 / 摸鱼阅读。"""
         dialog = SettingsCenter(self, self)
         dialog.show_panel(panel_key)
+        if novel_tab is not None and "novel" in dialog.panels:
+            dialog.panels["novel"].set_tab(novel_tab)
         dialog.exec()
         self.load_novel_book()
         self.update_tip()
@@ -3772,18 +5124,21 @@ class SalaryBar(QWidget):
 
     def toggle_pause(self):
         if self.paused:
-            self.elapsed.restart()
             self.paused = False
         else:
-            self.earned_base = self.earned
+            self.paused_value = self.earned
             self.paused = True
         self.shown_earned = self.earned
         self.update_tip()
 
     def reset_earned(self):
-        self.earned_base = 0.0
-        self.elapsed.restart()
-        self.shown_earned = 0.0
+        """把今天的累计清零，之后按秒照涨；过了零点自动作废。"""
+        self.reset_day = datetime.date.today()
+        self.reset_value = self.earned_today()
+        if self.paused:
+            self.paused_value = 0.0
+        self.shown_earned = self.earned
+        self.update()
         self.update_tip()
 
     def toggle_visibility(self):

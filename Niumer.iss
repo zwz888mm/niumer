@@ -1,9 +1,9 @@
-﻿; Niumer 安装包脚本（Inno Setup 6）
+; Niumer 安装包脚本（Inno Setup 6）
 ; 先跑 python build.py 生成 dist\Niumer.exe，再用 ISCC Niumer.iss 编译，
-; 产物在 dist\Niumer-Setup-1.0.0.exe。build.py 会自动调用 ISCC（如果装了）。
+; 产物在 dist\Niumer-Setup-1.1.0.exe。build.py 会自动调用 ISCC（如果装了）。
 
 #define MyAppName "Niumer"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.8"
 #define MyAppPublisher "200Kg"
 #define MyAppContact "zwz888123@gmail.com"
 #define MyAppExeName "Niumer.exe"
@@ -17,7 +17,7 @@ AppPublisher={#MyAppPublisher}
 AppContact={#MyAppContact}
 AppPublisherURL=mailto:{#MyAppContact}
 AppSupportURL=mailto:{#MyAppContact}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.8.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Niumer 安装程序
 VersionInfoProductName={#MyAppName}
@@ -46,7 +46,9 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "autostart"; Description: "开机自动启动"; GroupDescription: "其他选项"; Flags: unchecked
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; onedir 版：把整个运行目录释放到 {app}，启动不再解压 28MB，快很多
+Source: "dist\{#MyAppVersion}\runtime\Niumer\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppVersion}\runtime\Niumer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
